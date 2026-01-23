@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
 import { useAlert } from '../components/AlertNotification';
+import { buildApiUrl } from '../utils/apiConfig';
 
 const FolderView = () => {
   const { folderId } = useParams();
@@ -82,7 +83,7 @@ const FolderView = () => {
       setLoading(true);
       const token = localStorage.getItem('auth_token');
       
-      const response = await axios.get(`/api/documentManagement/folders/${folderId}`, {
+      const response = await axios.get(buildApiUrl(`/documentManagement/folders/${folderId}`), {
         headers: {
           ...(token && { Authorization: `Bearer ${token}` })
         }
@@ -120,7 +121,7 @@ const FolderView = () => {
       const token = localStorage.getItem('auth_token');
       
       const response = await axios.get(
-        `/api/documentManagement/documents/${doc._id}/download`,
+        buildApiUrl(`/documentManagement/documents/${doc._id}/download`),
         {
           headers: {
             ...(token && { Authorization: `Bearer ${token}` })
@@ -155,11 +156,11 @@ const FolderView = () => {
       const token = localStorage.getItem('auth_token');
       
       if (item.type === 'folder') {
-        await axios.delete(`/api/documentManagement/folders/${item._id}`, {
+        await axios.delete(buildApiUrl(`/documentManagement/folders/${item._id}`), {
           headers: { ...(token && { Authorization: `Bearer ${token}` }) }
         });
       } else {
-        await axios.delete(`/api/documentManagement/documents/${item._id}`, {
+        await axios.delete(buildApiUrl(`/documentManagement/documents/${item._id}`), {
           headers: { ...(token && { Authorization: `Bearer ${token}` }) }
         });
       }
@@ -194,7 +195,7 @@ const FolderView = () => {
     try {
       const token = localStorage.getItem('auth_token');
       await axios.put(
-        `/api/documentManagement/documents/${docToRename._id}`,
+        buildApiUrl(`/documentManagement/documents/${docToRename._id}`),
         { name: nextName },
         {
           headers: { ...(token && { Authorization: `Bearer ${token}` }) }
