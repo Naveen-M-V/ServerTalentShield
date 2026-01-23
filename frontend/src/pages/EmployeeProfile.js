@@ -819,11 +819,15 @@ const DocumentsTab = ({ employee }) => {
         formData.append('description', uploadForm.description);
       }
 
+      const token = localStorage.getItem('auth_token');
       await axios.post(
         buildApiUrl(`/documentManagement/employees/${employee._id}/upload`),
         formData,
         {
-          headers: { 'Content-Type': 'multipart/form-data' },
+          headers: { 
+            'Content-Type': 'multipart/form-data',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
           withCredentials: true
         }
       );

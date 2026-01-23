@@ -955,7 +955,8 @@ const UserDashboard = () => {
                 <DocumentTextIcon className="h-6 w-6 mr-3 text-blue-600" />
                 My Documents
               </h2>
-              <MyDocumentsWidget userId={user?.employeeId || user?._id || user?.id} />
+              {console.log('🔍 Rendering MyDocumentsWidget with userId:', userProfile?._id || user?.id, 'userProfile._id:', userProfile?._id, 'user.id:', user?.id)}
+              <MyDocumentsWidget userId={userProfile?._id || user?.id} />
             </div>
 
             {/* E-Learning Widget */}
@@ -1481,23 +1482,39 @@ const MyDocumentsWidget = ({ userId }) => {
   }, [userId]);
 
   const fetchMyDocuments = async () => {
-    if (!userId) return;
+    if (!userId) {
+      console.log('⚠️ MyDocumentsWidget: userId is undefined, skipping fetch');
+      setLoading(false);
+      return;
+    }
+    
+    console.log('📂 MyDocumentsWidget: Fetching documents for userId:', userId);
+    
     try {
       setLoading(true);
-      const response = await fetch(
-        buildApiUrl(`/documentManagement/employees/${userId}/my-documents`),
-        { credentials: 'include' }
-      );
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/documentManagement/employees/${userId}/my-documents`);
+      
+      console.log('📂 Fetching from:', url);
+      console.log('📂 Has token:', !!token);
+      
+      const response = await fetch(url, { 
+        credentials: 'include',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      });
       
       if (response.ok) {
         const data = await response.json();
+        console.log('✅ My Documents fetched:', data.documents?.length || 0, 'documents');
         setDocuments(data.documents || []);
       } else {
-        console.error('Failed to fetch documents:', response.status);
+        console.error('❌ Failed to fetch documents:', response.status, response.statusText);
         setDocuments([]);
       }
     } catch (error) {
-      console.error('Error fetching My Documents:', error);
+      console.error('❌ Error fetching My Documents:', error);
       setDocuments([]);
     } finally {
       setLoading(false);
@@ -1520,11 +1537,15 @@ const MyDocumentsWidget = ({ userId }) => {
       formData.append('file', uploadFile);
       formData.append('category', 'other');
 
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(
         buildApiUrl(`/documentManagement/employees/${userId}/upload`),
         {
           method: 'POST',
           credentials: 'include',
+          headers: {
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: formData
         }
       );
@@ -1847,7 +1868,7 @@ const LeaveStatusSection = ({ userId }) => {
     try {
       setLoading(true);
       const response = await fetch(
-        buildApiUrl('/leave-requests/my-requests'),
+        buildApiUrl('/leave/my-requests'),
         { credentials: 'include' }
       );
       

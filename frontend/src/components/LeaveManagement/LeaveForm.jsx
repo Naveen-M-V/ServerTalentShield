@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Calendar, MessageSquare, CheckCircle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import axios from '../../utils/axiosConfig';
+import { buildApiUrl } from '../../utils/apiConfig';
 import { toast } from 'react-toastify';
 
 const LeaveForm = ({ selectedDates }) => {
@@ -83,7 +84,7 @@ const LeaveForm = ({ selectedDates }) => {
         status: 'Pending'
       };
 
-      const response = await axios.post('/api/leave/request', payload);
+      const response = await axios.post(buildApiUrl('/leave/request'), payload);
 
       if (response.data.success) {
         toast.success('Leave request submitted successfully');

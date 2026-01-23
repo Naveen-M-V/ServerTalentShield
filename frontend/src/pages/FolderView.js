@@ -83,17 +83,31 @@ const FolderView = () => {
       setLoading(true);
       const token = localStorage.getItem('auth_token');
       
+      if (!token) {
+        console.error('❌ No auth token found');
+        navigate('/login');
+        return;
+      }
+      
+      console.log('📂 FolderView: Fetching folder contents for:', folderId);
+      
       const response = await axios.get(buildApiUrl(`/documentManagement/folders/${folderId}`), {
         headers: {
-          ...(token && { Authorization: `Bearer ${token}` })
-        }
+          Authorization: `Bearer ${token}`
+        },
+        withCredentials: true
       });
       
+      console.log('✅ Folder contents fetched');
       setFolder(response.data.folder);
       setBreadcrumb(Array.isArray(response.data.breadcrumb) ? response.data.breadcrumb : []);
       setItems(response.data.contents || []);
     } catch (error) {
-      console.error('Error fetching folder contents:', error);
+      console.error('❌ Error fetching folder contents:', error);
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        console.error('Authentication failed, redirecting to login');
+        // The axios interceptor will handle redirect
+      }
     } finally {
       setLoading(false);
     }

@@ -1095,12 +1095,16 @@ async function ensureMyDocumentsFolder(employeeId) {
  * Upload document to employee's "My Documents" folder (admin only)
  */
 router.post('/employees/:employeeId/upload',
-  checkPermission('upload'),
   upload.single('file'),
   async (req, res) => {
     try {
       const { employeeId } = req.params;
       const { category } = req.body;
+
+      // Explicit admin authorization check
+      if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'super-admin')) {
+        return res.status(403).json({ message: 'Admin access required' });
+      }
 
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
@@ -1152,9 +1156,21 @@ router.get('/employees/:employeeId/my-documents', async (req, res) => {
     const userRole = req.user?.role;
     const userId = req.user?._id || req.user?.userId || req.user?.id;
 
+    console.log('📂 GET /my-documents - Auth check:', {
+      employeeId,
+      userId,
+      userRole,
+      match: String(userId) === String(employeeId),
+      reqUser: req.user
+    });
+
     // Authorization check: if not admin, must be accessing own documents
     if (userRole !== 'admin' && userRole !== 'super-admin') {
       if (String(userId) !== String(employeeId)) {
+        console.error('❌ Access denied: userId mismatch', {
+          userId,
+          employeeId
+        });
         return res.status(403).json({ message: 'Access denied' });
       }
     }
