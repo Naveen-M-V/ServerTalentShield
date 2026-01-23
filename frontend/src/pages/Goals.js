@@ -35,7 +35,8 @@ const initialForm = {
   category: 'Other',
   deadline: '',
   progress: 0,
-  status: 'TO_DO'
+  status: 'TO_DO',
+  userId: '' // For admin to assign goal to employee
 };
 
 function Modal({ open, title, onClose, children, footer }) {
@@ -115,6 +116,8 @@ export default function Goals() {
   const [showDetail, setShowDetail] = useState(false);
   const [detailGoal, setDetailGoal] = useState(null);
 
+  const [employees, setEmployees] = useState([]);
+
   useEffect(() => {
     const loadUser = async () => {
       try {
@@ -125,6 +128,7 @@ export default function Goals() {
         if (adminFlag) {
           setActiveTab('team');
           fetchSummary();
+          fetchEmployees();
         }
       } catch (err) {
         console.error('Failed to load user', err);
@@ -140,6 +144,17 @@ export default function Goals() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab, filters]);
+
+  const fetchEmployees = async () => {
+    try {
+      const res = await axios.get(buildApiUrl('/employees'), { withCredentials: true });
+      const payload = Array.isArray(res.data) ? res.data : res.data.employees || res.data.data || [];
+      setEmployees(payload);
+    } catch (err) {
+      console.error('Failed to load employees', err);
+      setEmployees([]);
+    }
+  };
 
   const fetchSummary = async () => {
     try {
@@ -192,7 +207,8 @@ export default function Goals() {
       category: goal.category || 'Other',
       deadline: goal.deadline ? goal.deadline.slice(0, 10) : '',
       progress: goal.progress ?? 0,
-      status: goal.status || 'TO_DO'
+      status: goal.status || 'TO_DO',
+      userId: goal.userId?._id || goal.userId || '' // Preserve userId for admin edits
     });
     setShowForm(true);
   };
@@ -200,6 +216,12 @@ export default function Goals() {
   const saveGoal = async () => {
     if (!formData.title || !formData.description || !formData.deadline) {
       toast.error('Title, description, and deadline are required');
+      return;
+    }
+
+    // Admin creating goal for employee: userId is required
+    if (isAdmin && !editingGoal && !formData.userId) {
+      toast.error('Please select an employee');
       return;
     }
 
@@ -211,6 +233,11 @@ export default function Goals() {
       progress: Number(formData.progress) || 0,
       status: formData.status
     };
+
+    // Include userId if admin is creating/editing and userId is set
+    if (isAdmin && formData.userId) {
+      payload.userId = formData.userId;
+    }
 
     try {
       if (editingGoal) {
@@ -512,6 +539,23 @@ export default function Goals() {
         )}
       >
         <div className="grid gap-4">
+          {isAdmin && !editingGoal && (
+            <div>
+              <label className="text-sm font-semibold text-gray-700">Assign to Employee *</label>
+              <select
+                value={formData.userId}
+                onChange={(e) => setFormData((f) => ({ ...f, userId: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+              >
+                <option value="">Select employee</option>
+                {employees.map((emp) => (
+                  <option key={emp._id} value={emp._id}>
+                    {emp.firstName} {emp.lastName} ({emp.employeeId || emp.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="text-sm font-semibold text-gray-700">Title</label>
             <input

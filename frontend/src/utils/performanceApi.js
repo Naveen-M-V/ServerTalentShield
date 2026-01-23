@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { buildApiUrl } from './apiConfig';
 
 const API_BASE_URL = '/api/performance';
 
@@ -50,37 +51,43 @@ export const goalsApi = {
         if (filters.assignee && filters.assignee !== 'all') params.append('assignee', filters.assignee);
         if (filters.search) params.append('search', filters.search);
 
-        const response = await api.get(`/goals?${params.toString()}`);
+        const url = buildApiUrl(`/goals?${params.toString()}`);
+        const response = await axios.get(url, { withCredentials: true });
         return response.data;
     },
 
-    // Get my goals
+    // Get my goals - FIXED to use correct endpoint
     getMyGoals: async () => {
-        const response = await api.get('/goals/my-goals');
+        const url = buildApiUrl('/goals/my');
+        const response = await axios.get(url, { withCredentials: true });
         return response.data;
     },
 
     // Get goal by ID
     getGoalById: async (id) => {
-        const response = await api.get(`/goals/${id}`);
+        const url = buildApiUrl(`/goals/${id}`);
+        const response = await axios.get(url, { withCredentials: true });
         return response.data;
     },
 
     // Create new goal
     createGoal: async (goalData) => {
-        const response = await api.post('/goals', goalData);
+        const url = buildApiUrl('/goals');
+        const response = await axios.post(url, goalData, { withCredentials: true });
         return response.data;
     },
 
     // Update goal
     updateGoal: async (id, updates) => {
-        const response = await api.put(`/goals/${id}`, updates);
+        const url = buildApiUrl(`/goals/${id}`);
+        const response = await axios.put(url, updates, { withCredentials: true });
         return response.data;
     },
 
     // Delete goal
     deleteGoal: async (id) => {
-        const response = await api.delete(`/goals/${id}`);
+        const url = buildApiUrl(`/goals/${id}`);
+        const response = await axios.delete(url, { withCredentials: true });
         return response.data;
     },
 };

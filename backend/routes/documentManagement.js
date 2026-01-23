@@ -1102,7 +1102,7 @@ router.post('/employees/:employeeId/upload',
       const { category } = req.body;
 
       // Explicit admin authorization check
-      if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'super-admin')) {
+      if (!req.user || !['admin', 'super-admin', 'hr'].includes(req.user.role)) {
         return res.status(403).json({ message: 'Admin access required' });
       }
 

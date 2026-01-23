@@ -58,10 +58,20 @@ const ELearning = () => {
         formData.append('description', uploadForm.description);
       }
 
-      await axios.post(buildApiUrl('/elearning/upload'), formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        withCredentials: true
-      });
+  const token = localStorage.getItem('auth_token');
+
+await axios.post(
+  buildApiUrl('/elearning/upload'),
+  formData,
+  {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+      ...(token && { Authorization: `Bearer ${token}` })
+    },
+    withCredentials: true
+  }
+);
+
 
       toast.success('E-Learning material uploaded successfully');
       setShowUploadModal(false);

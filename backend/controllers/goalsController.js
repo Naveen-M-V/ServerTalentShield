@@ -44,8 +44,10 @@ exports.getUserGoals = async (req, res) => {
  */
 exports.createGoal = async (req, res) => {
   try {
-    const { title, description, category, deadline } = req.body;
-    const userId = req.user?._id || req.session?.userId;
+    const { title, description, category, deadline, userId: targetUserId } = req.body;
+    const currentUserId = req.user?._id || req.session?.userId;
+    const userRole = req.user?.role || req.session?.role;
+    const isAdmin = ['admin', 'super-admin', 'hr'].includes(userRole);
 
     // Validate required fields
     if (!title || !description || !deadline) {
@@ -55,8 +57,13 @@ exports.createGoal = async (req, res) => {
       });
     }
 
-    // Get employee details
-    const employee = await EmployeeHub.findById(userId);
+    // Determine goal owner:
+    // - If admin provides userId in payload, use that (admin assigning to employee)
+    // - Otherwise, assign to current user (self-creation)
+    const goalOwnerId = (isAdmin && targetUserId) ? targetUserId : currentUserId;
+
+    // Get employee details for the goal owner
+    const employee = await EmployeeHub.findById(goalOwnerId);
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -66,14 +73,14 @@ exports.createGoal = async (req, res) => {
 
     // Create goal
     const goal = new Goal({
-      userId,
+      userId: goalOwnerId,
       title: title.trim(),
       description: description.trim(),
       category: category || 'Other',
       deadline: new Date(deadline),
       employeeName: `${employee.firstName} ${employee.lastName}`,
       department: employee.department,
-      createdBy: userId
+      createdBy: currentUserId
     });
 
     await goal.save();

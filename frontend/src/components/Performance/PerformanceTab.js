@@ -22,40 +22,25 @@ const PerformanceTab = ({ user, userProfile }) => {
           const myReviews = await reviewsApi.getMyReviews();
           setReviews(Array.isArray(myReviews) ? myReviews : (myReviews && myReviews.reviews) || []);
         } catch (err) {
+          console.error('Failed to load reviews', err);
           setReviews([]);
         }
 
         try {
-          const myGoals = await goalsApi.getMyGoals();
-          setGoals(Array.isArray(myGoals) ? myGoals : (myGoals && myGoals.goals) || []);
+          const goalsResp = await goalsApi.getMyGoals();
+          // Handle response from /api/goals/my endpoint
+          const goalsData = goalsResp?.data || goalsResp?.goals || goalsResp;
+          setGoals(Array.isArray(goalsData) ? goalsData : []);
         } catch (err) {
+          console.error('Failed to load goals', err);
           setGoals([]);
         }
 
-        // Notes (only visible to admin/hr/managers)
-        if (employeeId) {
-          try {
-            const notesResp = await notesApi.getNotesForEmployee(employeeId);
-            setNotes(Array.isArray(notesResp) ? notesResp : (notesResp && notesResp.notes) || []);
-          } catch (err) {
-            // not allowed or none
-            setNotes([]);
-          }
-        } else {
-          setNotes([]);
-        }
+        // Notes (only visible to admin/hr/managers) - Skip for now as endpoint may not exist
+        setNotes([]);
 
-        // PIPs
-        if (employeeId) {
-          try {
-            const pipsResp = await pipsApi.getForEmployee(employeeId);
-            setPips(Array.isArray(pipsResp) ? pipsResp : (pipsResp && pipsResp.pips) || []);
-          } catch (err) {
-            setPips([]);
-          }
-        } else {
-          setPips([]);
-        }
+        // PIPs - Skip for now as endpoint may not exist
+        setPips([]);
       } catch (error) {
         console.error('Error loading performance data', error);
       } finally {

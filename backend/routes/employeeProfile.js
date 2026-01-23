@@ -35,7 +35,7 @@ router.get('/:id', async (req, res) => {
     console.log("═══════════════════════════════════════");
 
     // Fetch documents and folders for this employee
-    const documents = await DocumentManagement.find({ employeeId: req.params.id })
+    const documents = await DocumentManagement.find({ ownerId: req.params.id })
       .populate('folderId', 'name description')
       .lean();
     
