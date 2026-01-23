@@ -955,7 +955,7 @@ const UserDashboard = () => {
                 <DocumentTextIcon className="h-6 w-6 mr-3 text-blue-600" />
                 My Documents
               </h2>
-              <MyDocumentsWidget userId={user._id} />
+              <MyDocumentsWidget userId={user?.employeeId || user?._id || user?.id} />
             </div>
 
             {/* E-Learning Widget */}
@@ -1475,10 +1475,13 @@ const MyDocumentsWidget = ({ userId }) => {
   const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
   useEffect(() => {
-    fetchMyDocuments();
+    if (userId) {
+      fetchMyDocuments();
+    }
   }, [userId]);
 
   const fetchMyDocuments = async () => {
+    if (!userId) return;
     try {
       setLoading(true);
       const response = await fetch(
@@ -1502,6 +1505,10 @@ const MyDocumentsWidget = ({ userId }) => {
   };
 
   const handleUpload = async () => {
+    if (!userId) {
+      alert('Missing employee information. Please re-login and try again.');
+      return;
+    }
     if (!uploadFile) {
       alert('Please select a file to upload');
       return;
@@ -1511,8 +1518,6 @@ const MyDocumentsWidget = ({ userId }) => {
       setUploading(true);
       const formData = new FormData();
       formData.append('file', uploadFile);
-      formData.append('ownerId', userId);
-      formData.append('visibility', 'employee');
       formData.append('category', 'other');
 
       const response = await fetch(

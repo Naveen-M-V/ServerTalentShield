@@ -81,9 +81,12 @@ router.post('/upload', isAdmin, upload.single('file'), async (req, res) => {
       mimeType: req.file.mimetype,
       uploadedBy: req.user._id || req.user.userId || req.user.id,
       uploadedByRole: req.user.role,
+      // E-learning materials are global; ensure no owner is set
+      ownerId: null,
       category: 'elearning',
       accessControl: {
-        visibility: 'all'
+        visibility: 'all',
+        allowedUserIds: []
       },
       isActive: true,
       isArchived: false
