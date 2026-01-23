@@ -896,7 +896,7 @@ const DocumentsTab = ({ employee }) => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Documents</h3>
-        {selectedFolder && isAdmin && (
+        {isAdmin && (
           <div className="flex items-center gap-2">
             <button
               onClick={handleUpload}
