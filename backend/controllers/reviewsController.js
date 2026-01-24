@@ -10,18 +10,83 @@
 const Review = require('../models/Review');
 const EmployeeHub = require('../models/EmployeesHub');
 
+const ADMIN_ROLES = ['admin', 'super-admin', 'hr'];
+const MANAGER_ROLES = [...ADMIN_ROLES, 'manager'];
+
+const getUserId = (req) => req.user?._id || req.user?.id || req.session?.userId;
+const getUserRole = (req) => req.user?.role || req.session?.role;
+const isManager = (req) => MANAGER_ROLES.includes(getUserRole(req));
+const getUserModel = (req) => (req.user?.userType === 'profile' ? 'User' : 'EmployeeHub');
+
+const validateReviewType = (reviewType) => ['ANNUAL', 'PROBATION', 'AD_HOC'].includes(reviewType);
+const trimOrNull = (v) => {
+  if (typeof v !== 'string') return v ?? null;
+  const t = v.trim();
+  return t ? t : null;
+};
+
+const validateRatingOrNull = (rating) => {
+  if (rating === null || rating === undefined || rating === '') return null;
+  const n = Number(rating);
+  if (!Number.isFinite(n) || n < 1 || n > 5) return '__INVALID__';
+  return n;
+};
+
 /**
  * Get user's reviews (history)
  * GET /api/reviews/my
  */
-exports.getUserReviews = async (req, res) => {
+exports.getMyReviews = async (req, res) => {
   try {
-    const userId = req.user?._id || req.session?.userId;
+    const employeeId = getUserId(req);
+    if (!employeeId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
 
-    const reviews = await Review.find({ userId })
+    const query = { employeeId };
+    const reviews = await Review.find(query)
       .select('-__v')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('managerFeedback.submittedBy', 'firstName lastName email')
+      .populate('employeeId', 'firstName lastName email department employeeId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const filtered = reviews.filter((r) => r.status !== 'DRAFT');
+
+    res.json({
+      success: true,
+      count: filtered.length,
+      data: filtered
+    });
+  } catch (error) {
+    console.error('Error fetching my reviews:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch reviews'
+    });
+  }
+};
+
+exports.listReviews = async (req, res) => {
+  try {
+    if (!isManager(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Manager/HR access required'
+      });
+    }
+
+    const { status, employeeId, reviewType } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    if (employeeId) query.employeeId = employeeId;
+    if (reviewType) query.reviewType = reviewType;
+
+    const reviews = await Review.find(query)
+      .select('-__v')
+      .populate('employeeId', 'firstName lastName email department employeeId')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -31,11 +96,10 @@ exports.getUserReviews = async (req, res) => {
       data: reviews
     });
   } catch (error) {
-    console.error('Error fetching user reviews:', error);
+    console.error('Error fetching reviews:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch reviews',
-      error: error.message
+      message: 'Failed to fetch reviews'
     });
   }
 };
@@ -47,13 +111,10 @@ exports.getUserReviews = async (req, res) => {
 exports.getReview = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.session?.userId;
-    const userRole = req.user?.role || req.session?.role;
+    const userId = getUserId(req);
 
     const review = await Review.findById(id)
-      .populate('userId', 'firstName lastName email department')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('managerFeedback.submittedBy', 'firstName lastName email');
+      .populate('employeeId', 'firstName lastName email department employeeId');
 
     if (!review) {
       return res.status(404).json({
@@ -62,20 +123,22 @@ exports.getReview = async (req, res) => {
       });
     }
 
-    // Check permissions
-    const isOwner = review.userId._id.toString() === userId.toString();
-    const isAdmin = userRole === 'admin' || userRole === 'super-admin' || userRole === 'hr';
-
-    if (!isOwner && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'You do not have permission to view this review'
-      });
+    const managerView = isManager(req);
+    if (!managerView) {
+      const isOwner = userId && review.employeeId?._id?.toString() === userId.toString();
+      if (!isOwner || review.status === 'DRAFT') {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to view this review'
+        });
+      }
     }
+
+    const payload = review.toObject();
 
     res.json({
       success: true,
-      data: review
+      data: payload
     });
   } catch (error) {
     console.error('Error fetching review:', error);
@@ -87,95 +150,16 @@ exports.getReview = async (req, res) => {
   }
 };
 
-/**
- * Submit self-assessment
- * POST /api/reviews/:id/self
- */
-exports.submitSelfAssessment = async (req, res) => {
+exports.createReview = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { selfAssessment } = req.body;
-    const userId = req.user?._id || req.session?.userId;
-
-    if (!selfAssessment || !Array.isArray(selfAssessment) || selfAssessment.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Self-assessment with at least one competency is required'
-      });
-    }
-
-    // Validate competencies
-    for (const item of selfAssessment) {
-      if (!item.competency || typeof item.rating !== 'number' || item.rating < 1 || item.rating > 5) {
-        return res.status(400).json({
-          success: false,
-          message: 'Each competency must have a title and rating between 1-5'
-        });
-      }
-    }
-
-    // Find the specific review
-    const review = await Review.findById(id);
-    if (!review) {
-      return res.status(404).json({
-        success: false,
-        message: 'Review not found'
-      });
-    }
-
-    // Check permissions (user can only edit their own review)
-    if (review.userId.toString() !== userId.toString()) {
+    if (!isManager(req)) {
       return res.status(403).json({
         success: false,
-        message: 'You can only edit your own review'
+        message: 'Manager/HR access required'
       });
     }
 
-    // Check if review is in correct status
-    if (review.status !== 'PENDING_SELF') {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot edit self-assessment. Review status is ${review.status}`
-      });
-    }
-
-    // Update self-assessment
-    review.selfAssessment = selfAssessment;
-    review.updatedBy = userId;
-    await review.save();
-
-    res.json({
-      success: true,
-      message: 'Self-assessment submitted successfully',
-      data: review
-    });
-  } catch (error) {
-    console.error('Error submitting self-assessment:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to submit self-assessment',
-      error: error.message
-    });
-  }
-};
-
-/**
- * Initiate review for employee (admin only)
- * POST /api/reviews/initiate
- */
-exports.initiateReview = async (req, res) => {
-  try {
-    const { employeeId, cycleId } = req.body;
-    const userRole = req.user?.role || req.session?.role;
-    const userId = req.user?._id || req.session?.userId;
-
-    // Only admins can initiate
-    if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
-      return res.status(403).json({
-        success: false,
-        message: 'You do not have permission to initiate reviews'
-      });
-    }
+    const { employeeId, reviewType, reviewPeriodStart, reviewPeriodEnd, discussionDate, managerFeedback } = req.body;
 
     if (!employeeId) {
       return res.status(400).json({
@@ -184,7 +168,13 @@ exports.initiateReview = async (req, res) => {
       });
     }
 
-    // Check if employee exists
+    if (reviewType !== undefined && !validateReviewType(reviewType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid review type'
+      });
+    }
+
     const employee = await EmployeeHub.findById(employeeId);
     if (!employee) {
       return res.status(404).json({
@@ -193,140 +183,58 @@ exports.initiateReview = async (req, res) => {
       });
     }
 
-    // Check if review already exists for this employee
-    const existingReview = await Review.findOne({
-      userId: employeeId,
-      status: { $in: ['PENDING_SELF', 'PENDING_MANAGER'] }
-    });
-
-    if (existingReview) {
-      return res.status(400).json({
-        success: false,
-        message: 'Employee already has an active review'
-      });
-    }
-
-    // Create new review
-    const review = new Review({
-      userId: employeeId,
-      cycleId: cycleId || null,
-      createdBy: userId
-    });
-
-    await review.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Review initiated successfully',
-      data: review
-    });
-  } catch (error) {
-    console.error('Error initiating review:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to initiate review',
-      error: error.message
-    });
-  }
-};
-
-/**
- * Submit manager feedback
- * POST /api/reviews/:id/manager
- */
-exports.submitManagerFeedback = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { rating, feedback, areasForImprovement } = req.body;
-    const userRole = req.user?.role || req.session?.role;
-    const userId = req.user?._id || req.session?.userId;
-
-    // Only admins/managers can submit
-    if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr' && userRole !== 'manager') {
-      return res.status(403).json({
-        success: false,
-        message: 'You do not have permission to submit manager feedback'
-      });
-    }
-
-    if (!rating || typeof rating !== 'number' || rating < 1 || rating > 5) {
+    const rating = validateRatingOrNull(managerFeedback?.rating);
+    if (rating === '__INVALID__') {
       return res.status(400).json({
         success: false,
         message: 'Rating must be between 1-5'
       });
     }
 
-    const review = await Review.findById(id);
-    if (!review) {
-      return res.status(404).json({
-        success: false,
-        message: 'Review not found'
-      });
-    }
+    const userId = getUserId(req);
+    const model = getUserModel(req);
 
-    if (review.status !== 'PENDING_MANAGER') {
-      return res.status(400).json({
-        success: false,
-        message: 'Review must be in PENDING_MANAGER status'
-      });
-    }
+    const review = await Review.create({
+      employeeId,
+      reviewType: reviewType || 'AD_HOC',
+      status: 'DRAFT',
+      reviewPeriodStart: reviewPeriodStart || null,
+      reviewPeriodEnd: reviewPeriodEnd || null,
+      discussionDate: discussionDate || null,
+      managerFeedback: {
+        rating,
+        feedback: trimOrNull(managerFeedback?.feedback),
+        areasForImprovement: trimOrNull(managerFeedback?.areasForImprovement)
+      },
+      createdBy: userId,
+      createdByModel: model,
+      updatedBy: userId,
+      updatedByModel: model
+    });
 
-    if (review.selfAssessment.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot submit manager feedback until self-assessment is complete'
-      });
-    }
-
-    // Submit manager feedback
-    review.managerFeedback = {
-      rating,
-      feedback: feedback?.trim() || null,
-      areasForImprovement: areasForImprovement?.trim() || null,
-      submittedAt: new Date(),
-      submittedBy: userId
-    };
-
-    // Mark as completed when manager feedback is submitted
-    review.status = 'COMPLETED';
-    review.finalizedAt = new Date();
-    review.updatedBy = userId;
-
-    await review.save();
-
-    res.json({
+    res.status(201).json({
       success: true,
-      message: 'Manager feedback submitted and review completed',
       data: review
     });
   } catch (error) {
-    console.error('Error submitting manager feedback:', error);
+    console.error('Error creating review:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to submit manager feedback',
-      error: error.message
+      message: 'Failed to create review'
     });
   }
 };
 
-/**
- * Advance review status (admin only)
- * POST /api/reviews/:id/status
- */
-exports.advanceReviewStatus = async (req, res) => {
+exports.updateReview = async (req, res) => {
   try {
-    const { id } = req.params;
-    const userRole = req.user?.role || req.session?.role;
-
-    // Only admins can advance status
-    if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
+    if (!isManager(req)) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to advance review status'
+        message: 'Manager/HR access required'
       });
     }
 
-    const review = await Review.findById(id);
+    const review = req.review || await Review.findById(req.params.id);
     if (!review) {
       return res.status(404).json({
         success: false,
@@ -334,73 +242,215 @@ exports.advanceReviewStatus = async (req, res) => {
       });
     }
 
-    if (review.status === 'PENDING_SELF' && review.selfAssessment.length > 0) {
-      review.status = 'PENDING_MANAGER';
-      review.updatedBy = req.user?._id || req.session?.userId;
-      await review.save();
-
-      return res.json({
-        success: true,
-        message: 'Review advanced to PENDING_MANAGER',
-        data: review
+    if (review.status !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft reviews can be edited'
       });
     }
 
-    res.status(400).json({
-      success: false,
-      message: 'Review cannot be advanced at this time'
+    const { reviewType, reviewPeriodStart, reviewPeriodEnd, discussionDate, managerFeedback } = req.body;
+    if (reviewType !== undefined && !validateReviewType(reviewType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid review type'
+      });
+    }
+
+    if (reviewType !== undefined) review.reviewType = reviewType;
+    if (reviewPeriodStart !== undefined) review.reviewPeriodStart = reviewPeriodStart || null;
+    if (reviewPeriodEnd !== undefined) review.reviewPeriodEnd = reviewPeriodEnd || null;
+    if (discussionDate !== undefined) review.discussionDate = discussionDate || null;
+
+    if (managerFeedback !== undefined) {
+      const rating = validateRatingOrNull(managerFeedback?.rating);
+      if (rating === '__INVALID__') {
+        return res.status(400).json({
+          success: false,
+          message: 'Rating must be between 1-5'
+        });
+      }
+
+      review.managerFeedback = {
+        rating,
+        feedback: trimOrNull(managerFeedback?.feedback),
+        areasForImprovement: trimOrNull(managerFeedback?.areasForImprovement)
+      };
+    }
+
+    const userId = getUserId(req);
+    const model = getUserModel(req);
+    review.updatedBy = userId;
+    review.updatedByModel = model;
+
+    await review.save();
+    res.json({
+      success: true,
+      data: review
     });
   } catch (error) {
-    console.error('Error advancing review status:', error);
+    console.error('Error updating review:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to advance review status',
-      error: error.message
+      message: 'Failed to update review'
     });
   }
 };
 
-/**
- * Get all reviews with filters (admin only)
- * GET /api/reviews?status=&employee=
- */
-exports.getAllReviews = async (req, res) => {
+exports.submitReview = async (req, res) => {
   try {
-    const userRole = req.user?.role || req.session?.role;
-
-    // Only admins can view all reviews
-    if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
+    if (!isManager(req)) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to view all reviews'
+        message: 'Manager/HR access required'
       });
     }
 
-    const { status, employeeId, cycleId } = req.query;
-    const query = {};
+    const review = req.review || await Review.findById(req.params.id);
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found'
+      });
+    }
 
-    if (status) query.status = status;
-    if (employeeId) query.userId = employeeId;
-    if (cycleId) query.cycleId = cycleId;
+    if (review.status !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft reviews can be submitted'
+      });
+    }
 
-    const reviews = await Review.find(query)
-      .populate('userId', 'firstName lastName email department employeeId')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('managerFeedback.submittedBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    review.status = 'SUBMITTED';
+    review.submittedAt = new Date();
+    review.submittedBy = getUserId(req);
+    review.submittedByModel = getUserModel(req);
+    review.updatedBy = getUserId(req);
+    review.updatedByModel = getUserModel(req);
 
+    await review.save();
     res.json({
       success: true,
-      count: reviews.length,
-      data: reviews
+      data: review
     });
   } catch (error) {
-    console.error('Error fetching all reviews:', error);
+    console.error('Error submitting review:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch reviews',
-      error: error.message
+      message: 'Failed to submit review'
+    });
+  }
+};
+
+exports.addEmployeeComment = async (req, res) => {
+  try {
+    const review = req.review || await Review.findById(req.params.id);
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found'
+      });
+    }
+
+    const userId = getUserId(req);
+    const isOwner = userId && review.employeeId?.toString() === userId.toString();
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only comment on your own reviews'
+      });
+    }
+
+    if (review.status !== 'SUBMITTED') {
+      return res.status(400).json({
+        success: false,
+        message: 'You can only comment on submitted reviews'
+      });
+    }
+
+    const comment = trimOrNull(req.body?.comment);
+    if (!comment) {
+      return res.status(400).json({
+        success: false,
+        message: 'Comment is required'
+      });
+    }
+    if (comment.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Comment cannot exceed 2000 characters'
+      });
+    }
+
+    if (review.employeeComment?.comment) {
+      return res.status(400).json({
+        success: false,
+        message: 'Employee comment has already been added'
+      });
+    }
+
+    review.employeeComment = {
+      comment,
+      updatedAt: new Date()
+    };
+    review.updatedBy = userId;
+    review.updatedByModel = getUserModel(req);
+
+    await review.save();
+    res.json({
+      success: true,
+      data: review
+    });
+  } catch (error) {
+    console.error('Error adding employee comment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add comment'
+    });
+  }
+};
+
+exports.closeReview = async (req, res) => {
+  try {
+    if (!isManager(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Manager/HR access required'
+      });
+    }
+
+    const review = req.review || await Review.findById(req.params.id);
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found'
+      });
+    }
+
+    if (review.status !== 'SUBMITTED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only submitted reviews can be closed'
+      });
+    }
+
+    review.status = 'COMPLETED';
+    review.completedAt = new Date();
+    review.completedBy = getUserId(req);
+    review.completedByModel = getUserModel(req);
+    review.updatedBy = getUserId(req);
+    review.updatedByModel = getUserModel(req);
+
+    await review.save();
+    res.json({
+      success: true,
+      data: review
+    });
+  } catch (error) {
+    console.error('Error closing review:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to close review'
     });
   }
 };

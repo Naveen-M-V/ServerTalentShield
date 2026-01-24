@@ -44,7 +44,8 @@ export const reviewsApi = {
     getAllReviews: async (filters = {}) => {
         const params = new URLSearchParams();
         if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-        if (filters.assignedTo && filters.assignedTo !== 'all') params.append('assignedTo', filters.assignedTo);
+        if (filters.employeeId) params.append('employeeId', filters.employeeId);
+        if (filters.reviewType && filters.reviewType !== 'all') params.append('reviewType', filters.reviewType);
 
         const url = buildApiUrl(`/reviews?${params.toString()}`);
         const response = await api.get(url);
@@ -74,10 +75,34 @@ export const reviewsApi = {
         return response.data;
     },
 
+    createReview: async (payload) => {
+        const url = buildApiUrl('/reviews');
+        const response = await api.post(url, payload);
+        return response.data;
+    },
+
     // Update review
     updateReview: async (id, updates) => {
         const url = buildApiUrl(`/reviews/${id}`);
         const response = await api.put(url, updates);
+        return response.data;
+    },
+
+    submitReview: async (id) => {
+        const url = buildApiUrl(`/reviews/${id}/submit`);
+        const response = await api.post(url, {});
+        return response.data;
+    },
+
+    closeReview: async (id) => {
+        const url = buildApiUrl(`/reviews/${id}/close`);
+        const response = await api.post(url, {});
+        return response.data;
+    },
+
+    addEmployeeComment: async (id, comment) => {
+        const url = buildApiUrl(`/reviews/${id}/comment`);
+        const response = await api.post(url, { comment });
         return response.data;
     },
 

@@ -12,6 +12,9 @@ const PerformanceTab = ({ user, userProfile }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
+  const [selectedReview, setSelectedReview] = useState(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+
   const employeeId = userProfile?._id;
 
   useEffect(() => {
@@ -20,7 +23,9 @@ const PerformanceTab = ({ user, userProfile }) => {
         setLoading(true);
         try {
           const myReviews = await reviewsApi.getMyReviews();
-          setReviews(Array.isArray(myReviews) ? myReviews : (myReviews && myReviews.reviews) || []);
+          const reviewsData = myReviews?.data || myReviews?.reviews || myReviews;
+          const normalized = Array.isArray(reviewsData) ? reviewsData : [];
+          setReviews(normalized);
         } catch (err) {
           console.error('Failed to load reviews', err);
           setReviews([]);
@@ -61,6 +66,20 @@ const PerformanceTab = ({ user, userProfile }) => {
       year: 'numeric',
     });
   };
+
+  const openReviewDetail = async (review) => {
+    try {
+      const res = await reviewsApi.getReviewById(review._id);
+      setSelectedReview(res?.data || review);
+      setShowReviewModal(true);
+    } catch (err) {
+      console.error('Failed to load review details', err);
+      setSelectedReview(null);
+      setShowReviewModal(false);
+    }
+  };
+
+  const completedReviews = (Array.isArray(reviews) ? reviews : []).filter((r) => r?.status === 'COMPLETED');
 
   const getGoalStatusBadge = (status) => {
     const statusColors = {
@@ -221,6 +240,129 @@ const PerformanceTab = ({ user, userProfile }) => {
           </div>
         )}
       </div>
+
+      <div className="bg-white shadow rounded-lg overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <div className="text-lg font-semibold text-gray-900">Review History</div>
+          <div className="text-sm text-gray-500 mt-1">Completed reviews are read-only.</div>
+        </div>
+
+        {completedReviews.length === 0 ? (
+          <div className="p-10 text-center text-gray-600">No completed reviews yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discussion Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completed</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {completedReviews.map((r) => (
+                  <tr key={r._id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.reviewType || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(r.discussionDate)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(r.completedAt)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.managerFeedback?.rating ?? '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                      <button
+                        type="button"
+                        onClick={() => openReviewDetail(r)}
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showReviewModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Review details</h3>
+              <button
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setSelectedReview(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ×
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+              {selectedReview ? (
+                <div className="space-y-4 text-sm text-gray-800">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Status</p>
+                      <p className="text-sm text-gray-900">{selectedReview.status || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Review type</p>
+                      <p className="text-sm text-gray-900">{selectedReview.reviewType || '-'}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500">Manager feedback</p>
+                    {selectedReview.managerFeedback?.rating || selectedReview.managerFeedback?.feedback || selectedReview.managerFeedback?.areasForImprovement ? (
+                      <div className="rounded-md border bg-gray-50 px-3 py-2">
+                        <p className="font-semibold text-gray-900">Rating: {selectedReview.managerFeedback?.rating ?? '-'}</p>
+                        {selectedReview.managerFeedback?.feedback && (
+                          <p className="mt-1 text-gray-700 whitespace-pre-wrap">{selectedReview.managerFeedback.feedback}</p>
+                        )}
+                        {selectedReview.managerFeedback?.areasForImprovement && (
+                          <p className="mt-1 text-gray-700 whitespace-pre-wrap">Areas for improvement: {selectedReview.managerFeedback.areasForImprovement}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No manager feedback.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500">Your comment</p>
+                    {selectedReview.employeeComment?.comment ? (
+                      <div className="rounded-md border bg-gray-50 px-3 py-2">
+                        <p className="text-gray-900 whitespace-pre-wrap">{selectedReview.employeeComment.comment}</p>
+                        {selectedReview.employeeComment.updatedAt && (
+                          <p className="mt-1 text-xs text-gray-500">Updated {formatDate(selectedReview.employeeComment.updatedAt)}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">No comment.</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-gray-600">Loading...</div>
+              )}
+            </div>
+            <div className="border-t px-6 py-4 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowReviewModal(false);
+                  setSelectedReview(null);
+                }}
+                className="rounded-md px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

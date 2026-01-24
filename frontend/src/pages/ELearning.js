@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, Download, Trash2, FileText, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Upload, Download, Trash2, FileText, X, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import axios from 'axios';
 import { buildApiUrl, buildDirectUrl } from '../utils/apiConfig';
 import { formatDateDDMMYY } from '../utils/dateFormatter';
 import { isAdmin } from '../utils/authUtils';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
@@ -15,6 +16,16 @@ const ELearning = () => {
   const [loading, setLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerMaterial, setViewerMaterial] = useState(null);
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [numPages, setNumPages] = useState(0);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+  const canvasRef = useRef(null);
+  const touchStartXRef = useRef(null);
   const [uploadForm, setUploadForm] = useState({
     file: null,
     title: '',
@@ -103,8 +114,144 @@ await axios.post(
   };
 
   const handleDownload = (material) => {
-    window.open(buildDirectUrl(material.fileUrl), '_blank');
+    const download = async () => {
+      try {
+        setDownloadingId(material._id);
+        const url = buildDirectUrl(material.fileUrl);
+        const token = localStorage.getItem('auth_token');
+        const res = await axios.get(url, {
+          responseType: 'blob',
+          withCredentials: true,
+          headers: {
+            ...(token && { Authorization: `Bearer ${token}` })
+          }
+        });
+
+        const blob = new Blob([res.data], { type: material.mimeType || 'application/octet-stream' });
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        const link = document.createElement('a');
+        link.href = blobUrl;
+
+        const rawName = material?.name || 'material';
+        const fileName = material?.mimeType?.includes('pdf') && !rawName.toLowerCase().endsWith('.pdf')
+          ? `${rawName}.pdf`
+          : rawName;
+
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        console.error('Download error:', error);
+        toast.error('Failed to download material');
+      } finally {
+        setDownloadingId(null);
+      }
+    };
+
+    download();
   };
+
+  const openPdfViewer = (material) => {
+    setViewerMaterial(material);
+    setViewerOpen(true);
+  };
+
+  const closePdfViewer = () => {
+    setViewerOpen(false);
+    setViewerMaterial(null);
+    setPdfDoc(null);
+    setNumPages(0);
+    setPageNumber(1);
+    setPdfLoading(false);
+    setPdfError('');
+  };
+
+  const onTouchStart = (e) => {
+    const x = e.touches?.[0]?.clientX;
+    touchStartXRef.current = typeof x === 'number' ? x : null;
+  };
+
+  const onTouchEnd = (e) => {
+    const startX = touchStartXRef.current;
+    touchStartXRef.current = null;
+    if (startX === null) return;
+    const endX = e.changedTouches?.[0]?.clientX;
+    if (typeof endX !== 'number') return;
+    const delta = endX - startX;
+    if (Math.abs(delta) < 50) return;
+    if (delta < 0) {
+      setPageNumber((p) => (numPages ? Math.min(numPages, p + 1) : p));
+    } else {
+      setPageNumber((p) => Math.max(1, p - 1));
+    }
+  };
+
+  useEffect(() => {
+    const loadPdf = async () => {
+      if (!viewerOpen || !viewerMaterial) return;
+      if (!viewerMaterial?.mimeType?.includes('pdf')) return;
+
+      try {
+        setPdfError('');
+        setPdfLoading(true);
+        setPdfDoc(null);
+        setNumPages(0);
+        setPageNumber(1);
+
+        const url = buildDirectUrl(viewerMaterial.fileUrl);
+        const token = localStorage.getItem('auth_token');
+
+        const task = pdfjsLib.getDocument({
+          url,
+          withCredentials: true,
+          httpHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
+          disableWorker: true
+        });
+
+        const doc = await task.promise;
+        setPdfDoc(doc);
+        setNumPages(doc.numPages || 0);
+      } catch (error) {
+        console.error('Failed to load PDF:', error);
+        setPdfError('Failed to load PDF');
+      } finally {
+        setPdfLoading(false);
+      }
+    };
+
+    loadPdf();
+  }, [viewerOpen, viewerMaterial]);
+
+  useEffect(() => {
+    const render = async () => {
+      if (!pdfDoc) return;
+      if (!canvasRef.current) return;
+      if (!numPages) return;
+      if (pageNumber < 1 || pageNumber > numPages) return;
+
+      try {
+        setPdfLoading(true);
+        const page = await pdfDoc.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1.35 });
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      } catch (error) {
+        console.error('Failed to render PDF page:', error);
+        setPdfError('Failed to render PDF');
+      } finally {
+        setPdfLoading(false);
+      }
+    };
+
+    render();
+  }, [pdfDoc, pageNumber, numPages]);
 
   const getFileIcon = (mimeType) => {
     if (mimeType?.includes('pdf')) return '📄';
@@ -211,12 +358,22 @@ await axios.post(
                 )}
                 
                 <div className="flex items-center gap-2">
+                  {material.mimeType?.includes('pdf') && (
+                    <button
+                      onClick={() => openPdfViewer(material)}
+                      className="p-2 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+                      title="View PDF"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDownload(material)}
                     className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    disabled={downloadingId === material._id}
                   >
                     <Download className="w-4 h-4" />
-                    Download
+                    {downloadingId === material._id ? 'Downloading...' : 'Download'}
                   </button>
                   {adminUser && (
                     <button
@@ -313,6 +470,83 @@ await axios.post(
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {uploading ? 'Uploading...' : 'Upload'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewerOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-5xl shadow-xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">{viewerMaterial?.name || 'PDF Viewer'}</h2>
+                <p className="text-sm text-gray-500 mt-1">Swipe left/right or use arrows to change pages.</p>
+              </div>
+              <button onClick={closePdfViewer} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div
+              className="px-6 py-4 max-h-[75vh] overflow-auto"
+              onTouchStart={onTouchStart}
+              onTouchEnd={onTouchEnd}
+            >
+              {pdfError ? (
+                <div className="p-8 text-center text-red-600">{pdfError}</div>
+              ) : pdfLoading && !pdfDoc ? (
+                <div className="p-8 text-center text-gray-600">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <div className="mt-3">Loading PDF...</div>
+                </div>
+              ) : (
+                <div className="flex justify-center">
+                  <canvas ref={canvasRef} className="max-w-full" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+                  disabled={!pdfDoc || pageNumber <= 1}
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPageNumber((p) => (numPages ? Math.min(numPages, p + 1) : p))}
+                  disabled={!pdfDoc || (numPages ? pageNumber >= numPages : true)}
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-sm text-gray-600">
+                {pdfDoc ? (
+                  <span>
+                    Page {pageNumber} of {numPages || '-'}
+                  </span>
+                ) : (
+                  <span>—</span>
+                )}
+              </div>
+
+              <button
+                onClick={() => handleDownload(viewerMaterial)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                disabled={!viewerMaterial || downloadingId === viewerMaterial?._id}
+              >
+                <Download className="w-4 h-4" />
+                {downloadingId === viewerMaterial?._id ? 'Downloading...' : 'Download'}
               </button>
             </div>
           </div>

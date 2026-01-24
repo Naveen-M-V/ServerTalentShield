@@ -12,39 +12,44 @@ const mongoose = require('mongoose');
  */
 
 const reviewSchema = new mongoose.Schema({
-  // === BASIC INFO ===
-  userId: {
+  employeeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'EmployeeHub',
-    required: [true, 'User ID is required'],
+    required: [true, 'Employee ID is required'],
     index: true
   },
 
-  cycleId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ReviewCycle',
+  reviewType: {
+    type: String,
+    enum: ['ANNUAL', 'PROBATION', 'AD_HOC'],
+    default: 'AD_HOC',
+    required: true,
+    index: true
+  },
+
+  status: {
+    type: String,
+    enum: ['DRAFT', 'SUBMITTED', 'COMPLETED'],
+    default: 'DRAFT',
+    required: true,
+    index: true
+  },
+
+  reviewPeriodStart: {
+    type: Date,
     default: null
   },
 
-  // === SELF-ASSESSMENT (User's Input) ===
-  selfAssessment: [{
-    competency: {
-      type: String,
-      required: true
-    },
-    rating: {
-      type: Number,
-      min: [1, 'Rating must be 1-5'],
-      max: [5, 'Rating must be 1-5'],
-      required: true
-    },
-    summary: {
-      type: String,
-      maxlength: 1000
-    }
-  }],
+  reviewPeriodEnd: {
+    type: Date,
+    default: null
+  },
 
-  // === MANAGER FEEDBACK (Admin/Manager's Input - Read-only for user) ===
+  discussionDate: {
+    type: Date,
+    default: null
+  },
+
   managerFeedback: {
     rating: {
       type: Number,
@@ -54,101 +59,110 @@ const reviewSchema = new mongoose.Schema({
     },
     feedback: {
       type: String,
-      maxlength: 2000,
+      maxlength: 5000,
       default: null
     },
     areasForImprovement: {
       type: String,
-      maxlength: 1000,
-      default: null
-    },
-    submittedAt: {
-      type: Date,
-      default: null
-    },
-    submittedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      maxlength: 5000,
       default: null
     }
   },
 
-  // === STATUS & WORKFLOW ===
-  status: {
-    type: String,
-    enum: ['PENDING_SELF', 'PENDING_MANAGER', 'COMPLETED'],
-    default: 'PENDING_SELF',
-    required: true,
-    index: true
+  employeeComment: {
+    comment: {
+      type: String,
+      maxlength: 2000,
+      default: null
+    },
+    updatedAt: {
+      type: Date,
+      default: null
+    }
   },
 
-  // === FINALIZATION ===
-  finalizedAt: {
+  submittedAt: {
     type: Date,
     default: null
   },
 
-  // === AUDIT FIELDS ===
+  submittedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  },
+
+  submittedByModel: {
+    type: String,
+    enum: ['EmployeeHub', 'User'],
+    default: null
+  },
+
+  completedAt: {
+    type: Date,
+    default: null
+  },
+
+  completedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  },
+
+  completedByModel: {
+    type: String,
+    enum: ['EmployeeHub', 'User'],
+    default: null
+  },
+
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    required: true
+  },
+
+  createdByModel: {
+    type: String,
+    enum: ['EmployeeHub', 'User'],
     required: true
   },
 
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    default: null
   },
 
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    index: true
-  },
-
-  updatedAt: {
-    type: Date,
-    default: Date.now
+  updatedByModel: {
+    type: String,
+    enum: ['EmployeeHub', 'User'],
+    default: null
   }
 
 }, { timestamps: true });
 
 // === INDEXES ===
-reviewSchema.index({ userId: 1, status: 1 });
-reviewSchema.index({ userId: 1, createdAt: -1 });
-reviewSchema.index({ cycleId: 1, status: 1 });
+reviewSchema.index({ employeeId: 1, status: 1 });
+reviewSchema.index({ employeeId: 1, createdAt: -1 });
 reviewSchema.index({ status: 1, createdAt: -1 });
-reviewSchema.index({ 'managerFeedback.submittedBy': 1 });
 
 // === INSTANCE METHODS ===
 
 /**
  * Check if user can edit self-assessment
  */
-reviewSchema.methods.canEditSelfAssessment = function() {
-  return this.status === 'PENDING_SELF';
+reviewSchema.methods.isReadOnly = function() {
+  return this.status === 'COMPLETED';
 };
 
 /**
  * Check if manager can submit feedback
  */
-reviewSchema.methods.canSubmitManagerFeedback = function() {
-  return this.status === 'PENDING_MANAGER' && this.selfAssessment.length > 0;
+reviewSchema.methods.canEmployeeView = function() {
+  return this.status === 'SUBMITTED' || this.status === 'COMPLETED';
 };
 
 /**
  * Transition review to next status
  */
-reviewSchema.methods.advanceStatus = function() {
-  if (this.status === 'PENDING_SELF') {
-    this.status = 'PENDING_MANAGER';
-    return true;
-  } else if (this.status === 'PENDING_MANAGER' && this.managerFeedback.submittedAt) {
-    this.status = 'COMPLETED';
-    this.finalizedAt = new Date();
-    return true;
-  }
-  return false;
+reviewSchema.methods.canEmployeeComment = function() {
+  return this.status === 'SUBMITTED';
 };
 
 module.exports = mongoose.model('Review', reviewSchema);
