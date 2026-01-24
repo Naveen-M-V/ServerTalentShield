@@ -23,6 +23,15 @@ const storage = multer.diskStorage({
   }
 });
 
+const uploadSingleFile = (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    next();
+  });
+};
+
 const upload = multer({
   storage,
   limits: {
@@ -60,7 +69,7 @@ const isAdmin = (req, res, next) => {
  * POST /api/elearning/upload
  * Upload E-Learning material (admin only)
  */
-router.post('/upload', isAdmin, upload.single('file'), async (req, res) => {
+router.post('/upload', isAdmin, uploadSingleFile, async (req, res) => {
   try {
     const { title, description } = req.body;
 
@@ -80,10 +89,10 @@ router.post('/upload', isAdmin, upload.single('file'), async (req, res) => {
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
       uploadedBy: req.user._id || req.user.userId || req.user.id,
-      uploadedByRole: req.user.role,
+      uploadedByRole: 'admin',
       // E-learning materials are global; ensure no owner is set
       ownerId: null,
-      category: 'elearning',
+      category: 'e_learning',
       accessControl: {
         visibility: 'all',
         allowedUserIds: []
@@ -115,7 +124,7 @@ router.get('/', async (req, res) => {
     }
 
     const materials = await DocumentManagement.find({
-      category: 'elearning',
+      category: 'e_learning',
       isActive: true,
       isArchived: false
     })
@@ -144,7 +153,7 @@ router.delete('/:id', isAdmin, async (req, res) => {
       return res.status(404).json({ message: 'E-Learning material not found' });
     }
 
-    if (material.category !== 'elearning') {
+    if (material.category !== 'e_learning') {
       return res.status(400).json({ message: 'Not an E-Learning material' });
     }
 
