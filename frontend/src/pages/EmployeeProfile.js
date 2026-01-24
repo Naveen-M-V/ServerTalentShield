@@ -875,6 +875,7 @@ const DocumentsTab = ({ employee }) => {
           <h3 className="text-lg font-semibold text-gray-900">Documents</h3>
           {isAdmin && (
             <button
+              type="button"
               onClick={handleUpload}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
@@ -899,6 +900,7 @@ const DocumentsTab = ({ employee }) => {
         {isAdmin && (
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleUpload}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
@@ -936,6 +938,7 @@ const DocumentsTab = ({ employee }) => {
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
+                type="button"
                 onClick={handleBackToFolders}
                 className="text-gray-600 hover:text-gray-900 font-medium"
               >
@@ -982,6 +985,7 @@ const DocumentsTab = ({ employee }) => {
                   </div>
                   <div className="flex items-center space-x-2">
                     <button 
+                      type="button"
                       onClick={() => handleDownload(doc)}
                       className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                       title="Download document"
@@ -989,6 +993,7 @@ const DocumentsTab = ({ employee }) => {
                       <Download className="w-4 h-4" />
                     </button>
                     <button 
+                      type="button"
                       onClick={() => handleDeleteDocument(doc)}
                       className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                       title="Delete document"
@@ -1012,6 +1017,7 @@ const DocumentsTab = ({ employee }) => {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Upload Document</h3>
               <button
+                type="button"
                 onClick={() => {
                   setShowUploadModal(false);
                   setUploadForm({ file: null, category: 'other', description: '' });
@@ -1070,6 +1076,7 @@ const DocumentsTab = ({ employee }) => {
 
             <div className="flex justify-end gap-3 mt-6">
               <button
+                type="button"
                 onClick={() => {
                   setShowUploadModal(false);
                   setUploadForm({ file: null, category: 'other', description: '' });
@@ -1080,6 +1087,7 @@ const DocumentsTab = ({ employee }) => {
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleUploadSubmit}
                 disabled={uploading || !uploadForm.file}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1101,6 +1109,7 @@ const DocumentsTab = ({ employee }) => {
             </p>
             <div className="flex justify-end gap-3">
               <button
+                type="button"
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDocumentToDelete(null);
@@ -1110,6 +1119,7 @@ const DocumentsTab = ({ employee }) => {
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={confirmDelete}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
               >

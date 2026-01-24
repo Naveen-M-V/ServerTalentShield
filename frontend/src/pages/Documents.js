@@ -35,12 +35,17 @@ import {
   SelectValue
 } from '../components/ui/select';
 import CreateFolderModal from '../components/DocumentManagement/CreateFolderModal';
+import { buildApiUrl } from '../utils/apiConfig';
 
-const Documents = () => {
+const Documents = ({ embedded = false }) => {
   const navigate = useNavigate();
   const { error: showError, success: showSuccess } = useAlert();
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [selectedFolderId, setSelectedFolderId] = useState(null);
+  const [selectedFolder, setSelectedFolder] = useState(null);
+  const [folderContents, setFolderContents] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0 });
   const [sortBy, setSortBy] = useState('name');
@@ -86,8 +91,41 @@ const Documents = () => {
   };
 
   const handleFolderClick = (folderId) => {
+    if (embedded) {
+      setSelectedFolderId(folderId);
+      return;
+    }
     navigate(`/documents/${folderId}`);
   };
+
+  const fetchFolderContents = async (folderId) => {
+    try {
+      setFolderLoading(true);
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(buildApiUrl(`/documentManagement/folders/${folderId}`), {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        withCredentials: true
+      });
+
+      setSelectedFolder(response.data.folder || null);
+      setFolderContents(Array.isArray(response.data.contents) ? response.data.contents : []);
+    } catch (error) {
+      console.error('Error fetching folder contents:', error);
+      showError('Failed to open folder');
+      setSelectedFolder(null);
+      setFolderContents([]);
+    } finally {
+      setFolderLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!embedded) return;
+    if (!selectedFolderId) return;
+    fetchFolderContents(selectedFolderId);
+  }, [embedded, selectedFolderId]);
 
   const handleRenameFolder = async (folder) => {
     setShowFolderMenu(null);
@@ -157,6 +195,12 @@ const Documents = () => {
     fetchFolders();
   };
 
+  const handleBackFromFolder = () => {
+    setSelectedFolderId(null);
+    setSelectedFolder(null);
+    setFolderContents([]);
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { 
@@ -200,6 +244,66 @@ const Documents = () => {
   };
 
   const totalPages = Math.ceil(pagination.total / pagination.limit);
+
+  if (embedded && selectedFolderId) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBackFromFolder}
+              className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+            >
+              Back
+            </button>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">{selectedFolder?.name || 'Folder'}</h2>
+              <p className="text-sm text-gray-500">{folderContents?.length || 0} items</p>
+            </div>
+          </div>
+        </div>
+
+        {folderLoading ? (
+          <div className="text-center py-8">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+            <p className="text-sm text-gray-600 mt-2">Loading folder...</p>
+          </div>
+        ) : folderContents.length === 0 ? (
+          <div className="text-center py-12">
+            <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">No documents in this folder</h3>
+            <p className="text-gray-600">This folder is currently empty.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-200">
+            {folderContents.map((item) => (
+              <div key={item._id || item.id} className="py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <FileText className="w-5 h-5 text-gray-500" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{item.name || item.fileName || 'Document'}</div>
+                    <div className="text-xs text-gray-500">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ''}</div>
+                  </div>
+                </div>
+
+                {item.fileUrl && (
+                  <button
+                    type="button"
+                    onClick={() => window.open(item.fileUrl, '_blank')}
+                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Open"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
