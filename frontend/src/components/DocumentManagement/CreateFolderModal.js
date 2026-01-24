@@ -1,28 +1,55 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Folder, Shield, Users, Eye, Edit, Trash2 } from 'lucide-react';
 import axios from 'axios';
 import '../../utils/axiosConfig';
+import MultiSelectDropdown from '../MultiSelectDropdown';
+import { buildApiUrl } from '../../utils/apiConfig';
 
 const CreateFolderModal = ({ onClose, onCreate, parentFolderId }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    permissions: {
-      view: ['admin', 'hr', 'manager', 'employee'],
-      edit: ['admin', 'hr'],
-      delete: ['admin']
-    }
+    viewEmployeeIds: [],
+    editEmployeeIds: [],
+    deleteEmployeeIds: []
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
 
-  const roles = ['admin', 'hr', 'manager', 'employee'];
   const permissionTypes = [
     { key: 'view', label: 'View Access', icon: Eye, color: 'green' },
     { key: 'edit', label: 'Edit Access', icon: Edit, color: 'blue' },
     { key: 'delete', label: 'Delete Access', icon: Trash2, color: 'red' }
   ];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchEmployees = async () => {
+      setEmployeesLoading(true);
+      try {
+        const response = await axios.get(buildApiUrl('/employees/with-clock-status'));
+        if (cancelled) return;
+        const list = Array.isArray(response.data?.data) ? response.data.data : [];
+        setEmployees(list);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Error fetching employees:', error);
+        setEmployees([]);
+      } finally {
+        if (cancelled) return;
+        setEmployeesLoading(false);
+      }
+    };
+
+    fetchEmployees();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -37,16 +64,82 @@ const CreateFolderModal = ({ onClose, onCreate, parentFolderId }) => {
     }
   };
 
-  const handlePermissionChange = (permissionType, role, isChecked) => {
-    setFormData(prev => ({
-      ...prev,
-      permissions: {
-        ...prev.permissions,
-        [permissionType]: isChecked
-          ? [...prev.permissions[permissionType], role]
-          : prev.permissions[permissionType].filter(r => r !== role)
+  const applyHierarchy = (next) => {
+    const viewSet = new Set((next.viewEmployeeIds || []).map(String));
+    const editSet = new Set((next.editEmployeeIds || []).map(String));
+    const deleteSet = new Set((next.deleteEmployeeIds || []).map(String));
+
+    for (const id of deleteSet) {
+      editSet.add(id);
+      viewSet.add(id);
+    }
+    for (const id of editSet) {
+      viewSet.add(id);
+    }
+
+    for (const id of Array.from(editSet)) {
+      if (!viewSet.has(id)) editSet.delete(id);
+    }
+    for (const id of Array.from(deleteSet)) {
+      if (!editSet.has(id)) deleteSet.delete(id);
+      if (!viewSet.has(id)) deleteSet.delete(id);
+    }
+
+    return {
+      ...next,
+      viewEmployeeIds: Array.from(viewSet),
+      editEmployeeIds: Array.from(editSet),
+      deleteEmployeeIds: Array.from(deleteSet)
+    };
+  };
+
+  const handleViewChange = (selected) => {
+    setFormData((prev) => {
+      const viewSet = new Set((selected || []).map(String));
+      const nextEdit = (prev.editEmployeeIds || []).map(String).filter((id) => viewSet.has(id));
+      const nextDelete = (prev.deleteEmployeeIds || []).map(String).filter((id) => viewSet.has(id));
+      return applyHierarchy({
+        ...prev,
+        viewEmployeeIds: Array.from(viewSet),
+        editEmployeeIds: nextEdit,
+        deleteEmployeeIds: nextDelete
+      });
+    });
+  };
+
+  const handleEditChange = (selected) => {
+    setFormData((prev) => {
+      const editSet = new Set((selected || []).map(String));
+      const viewSet = new Set((prev.viewEmployeeIds || []).map(String));
+      for (const id of editSet) viewSet.add(id);
+      const nextDelete = (prev.deleteEmployeeIds || []).map(String).filter((id) => editSet.has(id));
+      return applyHierarchy({
+        ...prev,
+        viewEmployeeIds: Array.from(viewSet),
+        editEmployeeIds: Array.from(editSet),
+        deleteEmployeeIds: nextDelete
+      });
+    });
+  };
+
+  const handleDeleteChange = (selected) => {
+    setFormData((prev) => {
+      const deleteSet = new Set((selected || []).map(String));
+      const editSet = new Set((prev.editEmployeeIds || []).map(String));
+      const viewSet = new Set((prev.viewEmployeeIds || []).map(String));
+
+      for (const id of deleteSet) {
+        editSet.add(id);
+        viewSet.add(id);
       }
-    }));
+
+      return applyHierarchy({
+        ...prev,
+        viewEmployeeIds: Array.from(viewSet),
+        editEmployeeIds: Array.from(editSet),
+        deleteEmployeeIds: Array.from(deleteSet)
+      });
+    });
   };
 
   const validateForm = () => {
@@ -81,8 +174,10 @@ const CreateFolderModal = ({ onClose, onCreate, parentFolderId }) => {
       const payload = {
         name: formData.name,
         description: formData.description,
-        permissions: formData.permissions,
-        parentFolderId: parentFolderId || null
+        parentFolderId: parentFolderId || null,
+        viewEmployeeIds: formData.viewEmployeeIds,
+        editEmployeeIds: formData.editEmployeeIds,
+        deleteEmployeeIds: formData.deleteEmployeeIds
       };
 
       const response = await axios.post(
@@ -221,30 +316,45 @@ const CreateFolderModal = ({ onClose, onCreate, parentFolderId }) => {
                 <Shield className="w-4 h-4 text-gray-600" />
                 <h3 className="text-sm font-medium text-gray-700">Folder Permissions</h3>
               </div>
+
+              <div className="mb-3 text-xs text-gray-500">Only selected employees can access this folder.</div>
               
               <div className="space-y-4">
-                {permissionTypes.map(({ key, label, icon: Icon, color }) => (
-                  <div key={key} className="border border-gray-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <Icon className={`w-4 h-4 text-${color}-600`} />
-                      <span className="text-sm font-medium text-gray-700">{label}</span>
+                {permissionTypes.map(({ key, label, icon: Icon, color }) => {
+                  const selectedValues =
+                    key === 'view'
+                      ? formData.viewEmployeeIds
+                      : key === 'edit'
+                        ? formData.editEmployeeIds
+                        : formData.deleteEmployeeIds;
+
+                  const onChange =
+                    key === 'view'
+                      ? handleViewChange
+                      : key === 'edit'
+                        ? handleEditChange
+                        : handleDeleteChange;
+
+                  return (
+                    <div key={key} className="border border-gray-200 rounded-lg p-3">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <Icon className={`w-4 h-4 text-${color}-600`} />
+                        <span className="text-sm font-medium text-gray-700">{label}</span>
+                      </div>
+                      <MultiSelectDropdown
+                        options={(employees || []).map((emp) => ({
+                          value: emp.id || emp._id,
+                          label: `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || 'Employee',
+                          subLabel: emp.email || ''
+                        }))}
+                        selectedValues={selectedValues}
+                        onChange={onChange}
+                        placeholder={employeesLoading ? 'Loading employees...' : 'Select employees...'}
+                        className={employeesLoading ? 'opacity-60 pointer-events-none' : ''}
+                      />
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {roles.map((role) => (
-                        <label key={role} className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formData.permissions[key].includes(role)}
-                            onChange={(e) => handlePermissionChange(key, role, e.target.checked)}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            disabled={loading}
-                          />
-                          <span className="text-sm text-gray-600 capitalize">{role}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

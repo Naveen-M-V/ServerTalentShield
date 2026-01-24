@@ -29,6 +29,7 @@ export default function CertificateManagement() {
   const { error } = useAlert();
   
   const [search, setSearch] = useState("");
+  const [selectedTimeframe, setSelectedTimeframe] = useState(30);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
   const [deleteDialog, setDeleteDialog] = useState({ open: false, certificateId: null, certificateName: '' });
@@ -57,8 +58,8 @@ export default function CertificateManagement() {
     if (!expiryDate) return false;
     const expiry = new Date(expiryDate.split('/').reverse().join('-'));
     const today = new Date();
-    const thirtyDaysFromNow = new Date(today.getTime() + (30 * 24 * 60 * 60 * 1000));
-    return expiry <= thirtyDaysFromNow && expiry >= today;
+    const futureDate = new Date(today.getTime() + (selectedTimeframe * 24 * 60 * 60 * 1000));
+    return expiry <= futureDate && expiry >= today;
   };
 
   // Check if certificate is expired
@@ -105,7 +106,7 @@ export default function CertificateManagement() {
     }
 
     return filtered;
-  }, [certificates, search, selectedCategory, selectedStatus, selectedProvider, selectedSection]);
+  }, [certificates, search, selectedCategory, selectedStatus, selectedProvider, selectedSection, selectedTimeframe]);
 
   // Get certificate status color
   const getStatusColor = (status) => {
@@ -171,13 +172,32 @@ export default function CertificateManagement() {
                 </h1>
                 <p className="text-gray-600 mt-1">Manage and track all certificates across your organization</p>
               </div>
-              <button
-                onClick={() => navigate("/dashboard/createcertificate")}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
-              >
-                <PlusIcon className="h-5 w-5" />
-                Add Certificate
-              </button>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium text-gray-700">Expiry Alert Period:</label>
+                  <Select
+                    value={selectedTimeframe.toString()}
+                    onValueChange={(value) => setSelectedTimeframe(parseInt(value))}
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Select period" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="30">30 days</SelectItem>
+                      <SelectItem value="60">60 days</SelectItem>
+                      <SelectItem value="90">90 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <button
+                  onClick={() => navigate("/dashboard/createcertificate")}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition-colors"
+                >
+                  <PlusIcon className="h-5 w-5" />
+                  Add Certificate
+                </button>
+              </div>
             </div>
 
             {/* Stats */}

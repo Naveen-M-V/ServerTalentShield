@@ -13,7 +13,8 @@ const MultiSelectDropdown = ({
   const dropdownRef = useRef(null);
 
   const filteredOptions = options.filter(option =>
-    option.label.toLowerCase().includes(searchTerm.toLowerCase())
+    option.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (option.subLabel || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const selectedOptions = options.filter(option =>

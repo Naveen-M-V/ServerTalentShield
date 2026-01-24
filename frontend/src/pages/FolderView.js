@@ -65,6 +65,7 @@ const FolderView = () => {
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [showDocumentViewer, setShowDocumentViewer] = useState(false);
   const [breadcrumb, setBreadcrumb] = useState([]);
+  const [folderPermissions, setFolderPermissions] = useState({ canView: true, canEdit: true, canDelete: true });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -102,6 +103,7 @@ const FolderView = () => {
       setFolder(response.data.folder);
       setBreadcrumb(Array.isArray(response.data.breadcrumb) ? response.data.breadcrumb : []);
       setItems(response.data.contents || []);
+      setFolderPermissions(response.data.folderPermissions || { canView: true, canEdit: true, canDelete: true });
     } catch (error) {
       console.error('❌ Error fetching folder contents:', error);
       if (error.response?.status === 401 || error.response?.status === 403) {
@@ -385,21 +387,25 @@ const FolderView = () => {
               </Select>
             </div>
 
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
-            >
-              <Upload className="w-4 h-4" />
-              Upload file
-            </button>
+            {(folderPermissions?.canEdit ?? true) && (
+              <button
+                onClick={() => setShowUploadModal(true)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                Upload file
+              </button>
+            )}
 
-            <button
-              onClick={() => setShowCreateFolderModal(true)}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Create Folder
-            </button>
+            {(folderPermissions?.canEdit ?? true) && (
+              <button
+                onClick={() => setShowCreateFolderModal(true)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Create Folder
+              </button>
+            )}
 
             {/* Create Report Button */}
             <button
@@ -428,24 +434,29 @@ const FolderView = () => {
                 </div>
               </div>
               <h2 className="text-xl font-semibold text-gray-900 mb-3">No documents yet</h2>
-              <p className="text-gray-600 mb-8 max-w-md mx-auto">
-                Get started by uploading your first document or creating a folder
-              </p>
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2"
-                >
-                  <Upload className="w-5 h-5" />
-                  Upload Document
-                </button>
-                <button
-                  onClick={() => setShowCreateFolderModal(true)}
-                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium flex items-center gap-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  Create Folder
-                </button>
+              <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-bold text-gray-900">{folder?.name || 'Folder'}</h1>
+                <div className="flex items-center gap-3">
+                  {(folderPermissions?.canEdit ?? true) && (
+                    <button
+                      onClick={() => setShowCreateFolderModal(true)}
+                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Folder
+                    </button>
+                  )}
+
+                  {(folderPermissions?.canEdit ?? true) && (
+                    <button
+                      onClick={() => setShowUploadModal(true)}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Upload
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -531,41 +542,45 @@ const FolderView = () => {
                               initial={{ opacity: 0, scale: 0.95, y: -10 }}
                               animate={{ opacity: 1, scale: 1, y: 0 }}
                               exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                              className="absolute right-0 top-8 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10"
+                              className="absolute right-0 top-10 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {item.type !== 'folder' && (
-                                <>
-                                  <button
-                                    onClick={() => handleView(item)}
-                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                  >
-                                    <Eye className="w-4 h-4" />
-                                    <span>View</span>
-                                  </button>
-                                  <button
-                                    onClick={() => handleRenameDocument(item)}
-                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                  >
-                                    <Pencil className="w-4 h-4" />
-                                    <span>Edit</span>
-                                  </button>
-                                  <button
-                                    onClick={() => handleDownload(item)}
-                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                    <span>Download</span>
-                                  </button>
-                                </>
+                              {item.type === 'document' && (
+                                <button
+                                  onClick={() => handleView(item)}
+                                  className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                  <span>View</span>
+                                </button>
                               )}
-                              <button
-                                onClick={() => openDeleteDialog(item)}
-                                className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                <span>Delete</span>
-                              </button>
+                              {item.type === 'document' && (
+                                <button
+                                  onClick={() => handleDownload(item)}
+                                  className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                  <Download className="w-4 h-4" />
+                                  <span>Download</span>
+                                </button>
+                              )}
+                              {item.type === 'document' && (folderPermissions?.canEdit ?? true) && (
+                                <button
+                                  onClick={() => handleRenameDocument(item)}
+                                  className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                  <span>Rename</span>
+                                </button>
+                              )}
+                              {(folderPermissions?.canDelete ?? true) && (
+                                <button
+                                  onClick={() => openDeleteDialog(item)}
+                                  className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  <span>Delete</span>
+                                </button>
+                              )}
                             </motion.div>
                           )}
                         </AnimatePresence>

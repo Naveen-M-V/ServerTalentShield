@@ -7,10 +7,9 @@ import AdminClockInModal from './AdminClockInModal';
 import AdminClockOutModal from './AdminClockOutModal';
 import EmployeeMap from './employeeLiveMap';
 import { ClockIcon } from '@heroicons/react/24/outline';
-import { getUserClockStatus, userClockOut, userStartBreak, userResumeWork } from '../utils/clockApi';
+import { getClockStatus, getUserClockStatus, userClockOut, userStartBreak, userResumeWork } from '../utils/clockApi';
 import { getCurrentUserLeaveBalance, getNextUpcomingLeave } from '../utils/leaveApi';
 import { toast } from 'react-toastify';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { formatDateDDMMYY } from '../utils/dateFormatter';
 
 const ComplianceDashboard = () => {
@@ -26,7 +25,6 @@ const ComplianceDashboard = () => {
     getCertificatesByJobRole
   } = useCertificates();
 
-  const [selectedTimeframe, setSelectedTimeframe] = useState(30);
   const [showAdminClockInModal, setShowAdminClockInModal] = useState(false);
   const [showAdminClockOutModal, setShowAdminClockOutModal] = useState(false);
   const [clockStatus, setClockStatus] = useState(null);
@@ -43,11 +41,29 @@ const ComplianceDashboard = () => {
   const [gpsCoordinates, setGpsCoordinates] = useState(null);
   const [locationAccuracy, setLocationAccuracy] = useState(null);
 
+  const [clockedInEmployees, setClockedInEmployees] = useState([]);
+  const [clockedInLoading, setClockedInLoading] = useState(false);
+
   useEffect(() => {
     fetchClockStatus();
+    fetchSystemClockIns();
     fetchLeaveData();
     captureCurrentLocation();
   }, []);
+
+  const fetchSystemClockIns = async () => {
+    setClockedInLoading(true);
+    try {
+      const includeAdmins = ['admin', 'super-admin', 'hr'].includes(user?.role);
+      const res = await getClockStatus({ includeAdmins });
+      const list = res?.clockedIn || res?.data?.clockedIn || [];
+      setClockedInEmployees(Array.isArray(list) ? list : []);
+    } catch (error) {
+      setClockedInEmployees([]);
+    } finally {
+      setClockedInLoading(false);
+    }
+  };
 
   // Capture current GPS location for map display
   const captureCurrentLocation = () => {
@@ -101,7 +117,7 @@ const ComplianceDashboard = () => {
   useEffect(() => {
     const getDashboardData = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/api/certificates/dashboard-stats?days=${selectedTimeframe}`, {
+        const response = await fetch(`${process.env.REACT_APP_API_URL}/api/certificates/dashboard-stats?days=30`, {
           method: 'GET',
           credentials: 'include',
           headers: {
@@ -134,8 +150,7 @@ const ComplianceDashboard = () => {
     };
 
     getDashboardData();
-  }, [selectedTimeframe, certificates]);
-
+  }, [certificates]);
 
   const formatDate = (dateString) => {
     return formatDateDDMMYY(dateString);
@@ -163,6 +178,7 @@ const ComplianceDashboard = () => {
 
   const onClockOutComplete = async () => {
     await fetchClockStatus();
+    await fetchSystemClockIns();
   };
 
   const handleStartBreak = async () => {
@@ -260,28 +276,64 @@ const ComplianceDashboard = () => {
               {clockLoading ? 'Loading...' : 'Clock In'}
             </button>
           )}
-          <div className="flex items-center space-x-2">
-            <label className="text-sm font-medium text-gray-700">Expiry Alert Period:</label>
-            <Select
-              value={selectedTimeframe.toString()}
-              onValueChange={(value) => setSelectedTimeframe(parseInt(value))}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">7 days</SelectItem>
-                <SelectItem value="30">30 days</SelectItem>
-                <SelectItem value="60">60 days</SelectItem>
-                <SelectItem value="90">90 days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
         </div>
       </div>
 
       {/* Compliance Insights Section */}
       <ComplianceInsights />
+
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">Clock-ins</h3>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">{clockedInEmployees.length} active</span>
+            <button
+              type="button"
+              onClick={fetchSystemClockIns}
+              className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {clockedInLoading ? (
+          <div className="mt-4 text-sm text-gray-600">Loading clock-ins...</div>
+        ) : clockedInEmployees.length === 0 ? (
+          <div className="mt-4 text-sm text-gray-600">No employees are currently clocked in.</div>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Employee</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Department</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Clocked in at</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {clockedInEmployees.map((emp) => (
+                  <tr key={emp._id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-sm text-gray-900">
+                      {`${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.email || '-'}
+                    </td>
+                    <td className="px-4 py-2 text-sm text-gray-700">{emp.department || '-'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">
+                      {emp.clockIn ? new Date(emp.clockIn).toLocaleTimeString() : '-'}
+                    </td>
+                    <td className="px-4 py-2 text-sm">
+                      <span className="inline-flex rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
+                        {emp.status === 'on_break' ? 'On break' : 'Clocked in'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Live Location Map */}
       {gpsCoordinates?.latitude && gpsCoordinates?.longitude && (
@@ -310,6 +362,7 @@ const ComplianceDashboard = () => {
           onClockIn={async (data) => {
             // Fetch the latest clock status to update the UI
             await fetchClockStatus();
+            await fetchSystemClockIns();
           }}
         />
       )}
@@ -322,6 +375,7 @@ const ComplianceDashboard = () => {
           onClockOut={async () => {
             setShowAdminClockOutModal(false);
             await fetchClockStatus();
+            await fetchSystemClockIns();
           }}
         />
       )}

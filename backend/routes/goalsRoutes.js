@@ -1,16 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const goalsController = require('../controllers/goalsController');
-const { authenticateSession } = require('../middleware/authenticateSession');
-const {
-  canAccessGoal,
-  canModifyGoal,
-  canDeleteGoal,
-  preventAdminFieldsEdit
-} = require('../middleware/goalsReviewsRBAC');
-
-// All routes require authentication
-router.use(authenticateSession);
 
 /**
  * User goals endpoints
@@ -23,13 +13,13 @@ router.get('/my', goalsController.getUserGoals);
 router.get('/summary/all', goalsController.getGoalsSummary);
 
 // Create new goal
-router.post('/', preventAdminFieldsEdit, goalsController.createGoal);
+router.post('/', goalsController.createGoal);
 
 // Update goal (user can update own unapproved goals)
-router.put('/:id', canModifyGoal, preventAdminFieldsEdit, goalsController.updateGoal);
+router.put('/:id', goalsController.updateGoal);
 
 // Delete goal (user can delete own unapproved goals)
-router.delete('/:id', canDeleteGoal, goalsController.deleteGoal);
+router.delete('/:id', goalsController.deleteGoal);
 
 /**
  * Admin-only endpoints

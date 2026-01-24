@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { buildApiUrl } from '../utils/apiConfig';
+import MultiSelectDropdown from '../components/MultiSelectDropdown';
+import { goalsApi } from '../utils/performanceApi';
 
-const API_BASE = process.env.REACT_APP_API_BASE_URL || '/api';
 const ADMIN_ROLES = ['admin', 'super-admin', 'hr'];
 
 const statusLabels = {
@@ -36,7 +37,10 @@ const initialForm = {
   deadline: '',
   progress: 0,
   status: 'TO_DO',
-  userId: '' // For admin to assign goal to employee
+  userId: '',
+  assignTarget: 'employees',
+  employeeIds: [],
+  teamIds: []
 };
 
 function Modal({ open, title, onClose, children, footer }) {
@@ -117,18 +121,27 @@ export default function Goals() {
   const [detailGoal, setDetailGoal] = useState(null);
 
   const [employees, setEmployees] = useState([]);
+  const [teams, setTeams] = useState([]);
+
+  const authConfig = (extra = {}) => {
+    const token = localStorage.getItem('auth_token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    return { withCredentials: true, headers, ...extra };
+  };
 
   useEffect(() => {
     const loadUser = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/auth/me`, { withCredentials: true });
-        setUser(res.data);
-        const adminFlag = ADMIN_ROLES.includes(res.data.role);
+        const res = await axios.get(buildApiUrl('/auth/me'), authConfig());
+        const resolvedUser = res.data?.data?.user ?? res.data?.user ?? res.data;
+        setUser(resolvedUser);
+        const adminFlag = ADMIN_ROLES.includes(resolvedUser?.role);
         setIsAdmin(adminFlag);
         if (adminFlag) {
           setActiveTab('team');
           fetchSummary();
           fetchEmployees();
+          fetchTeams();
         }
       } catch (err) {
         console.error('Failed to load user', err);
@@ -147,7 +160,7 @@ export default function Goals() {
 
   const fetchEmployees = async () => {
     try {
-      const res = await axios.get(buildApiUrl('/employees'), { withCredentials: true });
+      const res = await axios.get(buildApiUrl('/employees'), authConfig());
       const payload = Array.isArray(res.data) ? res.data : res.data.employees || res.data.data || [];
       setEmployees(payload);
     } catch (err) {
@@ -156,10 +169,22 @@ export default function Goals() {
     }
   };
 
+  const fetchTeams = async () => {
+    try {
+      const res = await axios.get(buildApiUrl('/teams'), authConfig());
+      const payload = res.data?.data ?? res.data ?? [];
+      setTeams(Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      console.error('Failed to load teams', err);
+      setTeams([]);
+    }
+  };
+
   const fetchSummary = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/goals/summary/all`, { withCredentials: true });
-      setSummary(res.data?.data || null);
+      const res = await goalsApi.getSummaryAll?.();
+      const payload = res?.data ?? res;
+      setSummary(payload || null);
     } catch (err) {
       console.error('Failed to load goals summary', err);
       setSummary(null);
@@ -170,19 +195,16 @@ export default function Goals() {
     try {
       setLoadingGoals(true);
       const isTeamView = isAdmin && activeTab === 'team';
-      const url = isTeamView ? '/goals' : '/goals/my';
+      const res = isTeamView
+        ? await goalsApi.getAllGoals({
+            status: filters.status,
+            department: filters.department,
+            employee: filters.employee,
+            approved: filters.approved
+          })
+        : await goalsApi.getMyGoals();
 
-      const params = isTeamView
-        ? {
-            status: filters.status !== 'all' ? filters.status : undefined,
-            department: filters.department || undefined,
-            employee: filters.employee || undefined,
-            approved: filters.approved === 'all' ? undefined : filters.approved === 'approved'
-          }
-        : undefined;
-
-      const res = await axios.get(`${API_BASE}${url}`, { params, withCredentials: true });
-      const payload = res.data?.data ?? res.data ?? [];
+      const payload = res?.data ?? res;
       setGoals(Array.isArray(payload) ? payload : []);
     } catch (err) {
       console.error('Failed to load goals', err);
@@ -208,10 +230,40 @@ export default function Goals() {
       deadline: goal.deadline ? goal.deadline.slice(0, 10) : '',
       progress: goal.progress ?? 0,
       status: goal.status || 'TO_DO',
-      userId: goal.userId?._id || goal.userId || '' // Preserve userId for admin edits
+      userId: goal.userId?._id || goal.userId || '',
+      assignTarget: 'employees',
+      employeeIds: [],
+      teamIds: []
     });
     setShowForm(true);
   };
+
+  const employeeOptions = useMemo(() => {
+    return (employees || []).map((emp) => ({
+      value: emp._id,
+      label: `${emp.firstName || ''} ${emp.lastName || ''}`.trim(),
+      subLabel: emp.employeeId || emp.email || emp.team || ''
+    }));
+  }, [employees]);
+
+  const teamOptions = useMemo(() => {
+    return (teams || []).map((team) => ({
+      value: team._id,
+      label: team.name,
+      subLabel: `${team.memberCount ?? (team.members?.length ?? 0)} members`
+    }));
+  }, [teams]);
+
+  const teamMembersById = useMemo(() => {
+    const map = new Map();
+    (teams || []).forEach((team) => {
+      const members = Array.isArray(team.members)
+        ? team.members.map((m) => (typeof m === 'string' ? m : (m?._id || m?.id))).filter(Boolean)
+        : [];
+      map.set(team._id, members);
+    });
+    return map;
+  }, [teams]);
 
   const saveGoal = async () => {
     if (!formData.title || !formData.description || !formData.deadline) {
@@ -219,10 +271,18 @@ export default function Goals() {
       return;
     }
 
-    // Admin creating goal for employee: userId is required
-    if (isAdmin && !editingGoal && !formData.userId) {
-      toast.error('Please select an employee');
-      return;
+    let resolvedEmployeeIds = [];
+    if (isAdmin && !editingGoal) {
+      const selectedEmployees = Array.isArray(formData.employeeIds) ? formData.employeeIds : [];
+      const selectedTeams = Array.isArray(formData.teamIds) ? formData.teamIds : [];
+      const teamMemberIds = selectedTeams.flatMap((teamId) => teamMembersById.get(teamId) || []);
+      const uniq = new Set([...selectedEmployees, ...teamMemberIds].filter(Boolean));
+      resolvedEmployeeIds = Array.from(uniq);
+
+      if (resolvedEmployeeIds.length === 0) {
+        toast.error('Please select at least one employee or team');
+        return;
+      }
     }
 
     const payload = {
@@ -234,18 +294,25 @@ export default function Goals() {
       status: formData.status
     };
 
-    // Include userId if admin is creating/editing and userId is set
-    if (isAdmin && formData.userId) {
-      payload.userId = formData.userId;
+    if (isAdmin && !editingGoal) {
+      payload.userIds = resolvedEmployeeIds;
+      if (resolvedEmployeeIds.length === 1) {
+        payload.userId = resolvedEmployeeIds[0];
+      }
     }
 
     try {
       if (editingGoal) {
-        await axios.put(`${API_BASE}/goals/${editingGoal._id}`, payload, { withCredentials: true });
+        await goalsApi.updateGoal(editingGoal._id, payload);
         toast.success('Goal updated');
       } else {
-        await axios.post(`${API_BASE}/goals`, payload, { withCredentials: true });
-        toast.success('Goal created');
+        const res = await goalsApi.createGoal(payload);
+        const createdCount = res?.count ?? res?.data?.length;
+        if (isAdmin && createdCount && createdCount > 1) {
+          toast.success(`Goals created (${createdCount})`);
+        } else {
+          toast.success('Goal created');
+        }
       }
       setShowForm(false);
       setEditingGoal(null);
@@ -261,7 +328,7 @@ export default function Goals() {
   const deleteGoal = async (goal) => {
     if (!window.confirm('Delete this goal? This cannot be undone.')) return;
     try {
-      await axios.delete(`${API_BASE}/goals/${goal._id}`, { withCredentials: true });
+      await goalsApi.deleteGoal(goal._id);
       toast.success('Goal deleted');
       fetchGoals();
       if (isAdmin) fetchSummary();
@@ -273,7 +340,7 @@ export default function Goals() {
 
   const approveGoal = async (goal) => {
     try {
-      await axios.post(`${API_BASE}/goals/${goal._id}/approve`, {}, { withCredentials: true });
+      await goalsApi.approveGoal?.(goal._id);
       toast.success('Goal approved');
       fetchGoals();
       fetchSummary();
@@ -295,11 +362,7 @@ export default function Goals() {
       return;
     }
     try {
-      await axios.post(
-        `${API_BASE}/goals/${commentGoal._id}/comment`,
-        { comment: commentText.trim() },
-        { withCredentials: true }
-      );
+      await goalsApi.addComment?.(commentGoal._id, commentText.trim());
       toast.success('Comment added');
       setShowCommentModal(false);
       setCommentGoal(null);
@@ -460,7 +523,8 @@ export default function Goals() {
                   const owner = goal.userId || {};
                   const ownerName = goal.employeeName || `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
                   const ownerId = goal.userId?._id || goal.userId;
-                  const isOwner = user && ownerId?.toString?.() === user._id;
+                  const currentUserId = user?._id || user?.id;
+                  const isOwner = currentUserId && ownerId?.toString?.() === currentUserId?.toString?.();
                   return (
                     <tr key={goal._id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 align-top">
@@ -541,19 +605,37 @@ export default function Goals() {
         <div className="grid gap-4">
           {isAdmin && !editingGoal && (
             <div>
-              <label className="text-sm font-semibold text-gray-700">Assign to Employee *</label>
-              <select
-                value={formData.userId}
-                onChange={(e) => setFormData((f) => ({ ...f, userId: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
-              >
-                <option value="">Select employee</option>
-                {employees.map((emp) => (
-                  <option key={emp._id} value={emp._id}>
-                    {emp.firstName} {emp.lastName} ({emp.employeeId || emp.email})
-                  </option>
-                ))}
-              </select>
+              <label className="text-sm font-semibold text-gray-700">Assign to *</label>
+              <div className="mt-1 grid gap-3">
+                <select
+                  value={formData.assignTarget}
+                  onChange={(e) => setFormData((f) => ({ ...f, assignTarget: e.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                >
+                  <option value="employees">Employees</option>
+                  <option value="teams">Teams</option>
+                </select>
+
+                {formData.assignTarget === 'employees' ? (
+                  <MultiSelectDropdown
+                    options={employeeOptions}
+                    selectedValues={formData.employeeIds}
+                    onChange={(vals) => setFormData((f) => ({ ...f, employeeIds: vals }))}
+                    placeholder="Search and select employees..."
+                  />
+                ) : (
+                  <MultiSelectDropdown
+                    options={teamOptions}
+                    selectedValues={formData.teamIds}
+                    onChange={(vals) => setFormData((f) => ({ ...f, teamIds: vals }))}
+                    placeholder="Search and select teams..."
+                  />
+                )}
+
+                <div className="text-xs text-gray-500">
+                  Selected: {Array.isArray(formData.employeeIds) ? formData.employeeIds.length : 0} employee(s), {Array.isArray(formData.teamIds) ? formData.teamIds.length : 0} team(s)
+                </div>
+              </div>
             </div>
           )}
           <div>

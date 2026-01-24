@@ -364,20 +364,24 @@ const Documents = () => {
                             className="absolute right-0 top-8 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              onClick={() => handleRenameFolder(folder)}
-                              className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                            >
-                              <Pencil className="w-4 h-4" />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteFolder(folder)}
-                              className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              <span>Delete</span>
-                            </button>
+                            {(folder.canEdit ?? true) && (
+                              <button
+                                onClick={() => handleRenameFolder(folder)}
+                                className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                              >
+                                <Pencil className="w-4 h-4" />
+                                <span>Edit</span>
+                              </button>
+                            )}
+                            {(folder.canDelete ?? true) && (
+                              <button
+                                onClick={() => handleDeleteFolder(folder)}
+                                className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                <span>Delete</span>
+                              </button>
+                            )}
                           </motion.div>
                         )}
                       </AnimatePresence>

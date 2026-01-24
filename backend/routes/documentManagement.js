@@ -8,6 +8,108 @@ const Folder = require('../models/Folder');
 const DocumentManagement = require('../models/DocumentManagement');
 const EmployeeHub = require('../models/EmployeesHub');
 
+const ADMIN_ROLES = ['admin', 'super-admin', 'hr'];
+
+const resolveEmployeeIdForUser = async (user) => {
+  if (!user) return null;
+  if (user.employeeId && mongoose.Types.ObjectId.isValid(String(user.employeeId))) {
+    return user.employeeId;
+  }
+
+  const authId = user._id || user.userId || user.id;
+  const authIdStr = authId ? String(authId).trim() : '';
+  let employee = null;
+
+  if (authIdStr && mongoose.Types.ObjectId.isValid(authIdStr)) {
+    employee = await EmployeeHub.findOne({ userId: authIdStr }).select('_id');
+    if (!employee) {
+      employee = await EmployeeHub.findById(authIdStr).select('_id');
+    }
+  }
+
+  if (!employee && user.email) {
+    employee = await EmployeeHub.findOne({ email: String(user.email).toLowerCase() }).select('_id');
+  }
+
+  if (employee?._id) {
+    user.employeeId = employee._id;
+    return employee._id;
+  }
+
+  return null;
+};
+
+const resolveEmployeeIdForRequest = async (req) => {
+  if (!req.user) return null;
+  return resolveEmployeeIdForUser(req.user);
+};
+
+const normalizeIdArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(v => v && v.toString()).filter(Boolean);
+  if (typeof value === 'string') return [value].map(v => v && v.toString()).filter(Boolean);
+  return [];
+};
+
+const enforcePermissionHierarchy = ({ viewEmployeeIds, editEmployeeIds, deleteEmployeeIds }) => {
+  const viewSet = new Set(normalizeIdArray(viewEmployeeIds));
+  const editSet = new Set(normalizeIdArray(editEmployeeIds));
+  const deleteSet = new Set(normalizeIdArray(deleteEmployeeIds));
+
+  for (const id of deleteSet) {
+    editSet.add(id);
+    viewSet.add(id);
+  }
+  for (const id of editSet) {
+    viewSet.add(id);
+  }
+
+  return {
+    viewEmployeeIds: Array.from(viewSet),
+    editEmployeeIds: Array.from(editSet),
+    deleteEmployeeIds: Array.from(deleteSet)
+  };
+};
+
+const requireFolderPermission = (action) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const role = req.user.role || 'employee';
+      if (ADMIN_ROLES.includes(role)) {
+        return next();
+      }
+
+      await resolveEmployeeIdForRequest(req);
+
+      const folderId = req.params.folderId;
+      if (!folderId) return next();
+
+      const folder = await Folder.findById(folderId);
+      if (!folder) return res.status(404).json({ message: 'Folder not found' });
+      req.folder = folder;
+
+      // Creator can always access
+      const empId = req.user.employeeId ? req.user.employeeId.toString() : null;
+      if (empId && folder.createdByEmployeeId && folder.createdByEmployeeId.toString() === empId) {
+        return next();
+      }
+
+      if (!folder.hasPermission(action, req.user)) {
+        return res.status(403).json({ message: 'Insufficient permissions' });
+      }
+
+      return next();
+    } catch (error) {
+      console.error('requireFolderPermission error:', { action, error });
+      return res.status(500).json({ message: error.message });
+    }
+  };
+};
+
 // ==================== UNIFIED DOCUMENT FETCH LOGIC ====================
 
 // Get all documents (admin: all, employee: permitted only)
@@ -16,23 +118,62 @@ router.get('/documents', async (req, res) => {
     if (!req.user || (!req.user._id && !req.user.userId && !req.user.id)) {
       return res.status(401).json({ message: 'Authentication required' });
     }
-    const userRole = req.user.role === 'admin' ? 'admin' : 'employee';
+    const role = req.user.role || 'employee';
+    const isAdminLike = ADMIN_ROLES.includes(role);
     const userId = req.user._id || req.user.userId || req.user.id;
     let query = { isActive: true };
 
-    if (userRole === 'admin') {
+    const empId = await resolveEmployeeIdForRequest(req);
+
+    if (isAdminLike) {
       // Admin sees all
     } else {
+      if (!empId) {
+        return res.json([]);
+      }
+
+      // Limit to folders the employee can view (prevents folder permission bypass)
+      const allowedFolders = await Folder.find({
+        isActive: true,
+        $or: [
+          { createdByEmployeeId: empId },
+          { 'permissions.viewEmployeeIds': empId },
+          { 'permissions.editEmployeeIds': empId },
+          { 'permissions.deleteEmployeeIds': empId }
+        ]
+      }).select('_id');
+      const allowedFolderIds = allowedFolders.map(f => f._id);
+
       // Employee: only permitted documents
-      query.$or = [
+      const docAccessOr = [
         { 'accessControl.visibility': 'all' },
-        { 'accessControl.visibility': 'employee', ownerId: req.user.employeeId },
+        { 'accessControl.visibility': 'employee', ownerId: empId },
         { 'accessControl.allowedUserIds': userId }
+      ];
+
+      query.$or = [
+        { folderId: null, $or: docAccessOr },
+        { folderId: { $in: allowedFolderIds }, $or: docAccessOr }
       ];
     }
 
     // Optional: filter by folder, category, etc.
-    if (req.query.folderId) query.folderId = req.query.folderId;
+    if (req.query.folderId) {
+      const requestedFolderId = String(req.query.folderId);
+      if (isAdminLike) {
+        query.folderId = requestedFolderId;
+      } else {
+        // Ensure employee can view this folder
+        const folder = await Folder.findById(requestedFolderId);
+        if (!folder) {
+          return res.status(404).json({ message: 'Folder not found' });
+        }
+        if (!folder.hasPermission('view', req.user)) {
+          return res.status(403).json({ message: 'Insufficient permissions' });
+        }
+        query.folderId = requestedFolderId;
+      }
+    }
     if (req.query.category) query.category = req.query.category;
 
     const documents = await DocumentManagement.find(query)
@@ -111,20 +252,15 @@ const checkPermission = (action) => {
       const userRole = user.role || 'employee';
       
       // Admin and super-admin have all permissions
-      if (userRole === 'admin' || userRole === 'super-admin') {
+      if (ADMIN_ROLES.includes(userRole)) {
         return next();
       }
+
+      await resolveEmployeeIdForRequest(req);
       
       // For folder operations, check folder permissions
       if (req.params.folderId) {
-        const folder = await Folder.findById(req.params.folderId);
-        if (!folder) {
-          return res.status(404).json({ message: 'Folder not found' });
-        }
-        
-        if (!folder.hasPermission(action, userRole)) {
-          return res.status(403).json({ message: 'Insufficient permissions' });
-        }
+        return requireFolderPermission(action)(req, res, next);
       }
       
       // For document operations, check document permissions
@@ -132,6 +268,22 @@ const checkPermission = (action) => {
         const document = await DocumentManagement.findById(req.params.documentId);
         if (!document) {
           return res.status(404).json({ message: 'Document not found' });
+        }
+
+        // If document belongs to a folder, folder permissions must allow this action too
+        if (document.folderId) {
+          const folder = await Folder.findById(document.folderId);
+          if (!folder) {
+            return res.status(404).json({ message: 'Folder not found' });
+          }
+
+          // Creator can always access
+          const empId = req.user.employeeId ? req.user.employeeId.toString() : null;
+          if (!(empId && folder.createdByEmployeeId && folder.createdByEmployeeId.toString() === empId)) {
+            if (!folder.hasPermission(action, req.user)) {
+              return res.status(403).json({ message: 'Insufficient permissions' });
+            }
+          }
         }
         
         if (!document.hasPermission(action, req.user)) {
@@ -201,10 +353,29 @@ router.get('/folders', async (req, res) => {
   try {
     console.log("📂 Fetching folders...");
     const includeSubfolders = String(req.query.includeSubfolders || '').toLowerCase() === 'true';
+    const role = req.user?.role;
+    const isAdminLike = ADMIN_ROLES.includes(role);
+    const empIdResolved = await resolveEmployeeIdForRequest(req);
+    const empId = empIdResolved ? empIdResolved.toString() : null;
     const folderQuery = {
       isActive: true,
       ...(includeSubfolders ? {} : { parentFolder: null })
     };
+
+    if (!isAdminLike && !empId) {
+      console.log('📂 EmployeeId not resolved for non-admin user; returning no folders');
+      res.set('Cache-Control', 'no-store');
+      return res.json({ success: true, folders: [] });
+    }
+
+    if (!isAdminLike && empId) {
+      folderQuery.$or = [
+        { createdByEmployeeId: req.user.employeeId },
+        { 'permissions.viewEmployeeIds': req.user.employeeId },
+        { 'permissions.editEmployeeIds': req.user.employeeId },
+        { 'permissions.deleteEmployeeIds': req.user.employeeId }
+      ];
+    }
 
     const folders = await Folder.find(folderQuery)
       .sort({ name: 1 });
@@ -229,6 +400,9 @@ router.get('/folders', async (req, res) => {
       const documentCount = await DocumentManagement.countDocuments(documentCountQuery);
       return {
         ...folder.toObject(),
+        canView: true,
+        canEdit: isAdminLike ? true : folder.hasPermission('edit', req.user),
+        canDelete: isAdminLike ? true : folder.hasPermission('delete', req.user),
         documentCount
       };
     }));
@@ -246,7 +420,7 @@ router.get('/folders', async (req, res) => {
 });
 
 // Get folder by ID with documents
-router.get('/folders/:folderId', async (req, res) => {
+router.get('/folders/:folderId', requireFolderPermission('view'), async (req, res) => {
   try {
     const folder = await Folder.findById(req.params.folderId)
       .populate('createdBy', 'firstName lastName employeeId');
@@ -299,16 +473,32 @@ router.get('/folders/:folderId', async (req, res) => {
     }
 
     // Get subfolders
-    const subfolders = await Folder.find({ parentFolder: req.params.folderId, isActive: true });
+    const subfoldersRaw = await Folder.find({ parentFolder: req.params.folderId, isActive: true });
+
+    const isAdminLikeForFolder = ADMIN_ROLES.includes(req.user?.role);
+    const subfolders = isAdminLikeForFolder
+      ? subfoldersRaw
+      : subfoldersRaw.filter((sf) => sf.hasPermission('view', req.user));
     
     // Format contents with type field for frontend
     const contents = [
-      ...subfolders.map(f => ({ ...f.toObject(), type: 'folder' })),
+      ...subfolders.map(f => ({
+        ...f.toObject(),
+        type: 'folder',
+        canView: true,
+        canEdit: isAdminLikeForFolder ? true : f.hasPermission('edit', req.user),
+        canDelete: isAdminLikeForFolder ? true : f.hasPermission('delete', req.user)
+      })),
       ...documents.map(d => ({ ...d.toObject(), type: 'document' }))
     ];
     
     res.json({
       folder,
+      folderPermissions: {
+        canView: true,
+        canEdit: isAdminLikeForFolder ? true : folder.hasPermission('edit', req.user),
+        canDelete: isAdminLikeForFolder ? true : folder.hasPermission('delete', req.user)
+      },
       breadcrumb,
       contents,
       documents // Keep for backwards compatibility
@@ -319,14 +509,38 @@ router.get('/folders/:folderId', async (req, res) => {
 });
 
 // Update folder
-router.put('/folders/:folderId', checkPermission('edit'), async (req, res) => {
+router.put('/folders/:folderId', requireFolderPermission('edit'), async (req, res) => {
   try {
-    const { name, description, permissions } = req.body;
+    const { name, description, viewEmployeeIds, editEmployeeIds, deleteEmployeeIds } = req.body;
 
     const update = {};
     if (typeof name === 'string' && name.trim()) update.name = name.trim();
     if (typeof description === 'string') update.description = description;
-    if (permissions !== undefined) update.permissions = permissions;
+    if (viewEmployeeIds !== undefined || editEmployeeIds !== undefined || deleteEmployeeIds !== undefined) {
+      const normalized = enforcePermissionHierarchy({
+        viewEmployeeIds,
+        editEmployeeIds,
+        deleteEmployeeIds
+      });
+
+      // Prevent accidental lockout of original creator
+      const creatorEmpId = req.folder?.createdByEmployeeId ? req.folder.createdByEmployeeId.toString() : null;
+      if (creatorEmpId) {
+        const v = new Set(normalizeIdArray(normalized.viewEmployeeIds));
+        const e = new Set(normalizeIdArray(normalized.editEmployeeIds));
+        const d = new Set(normalizeIdArray(normalized.deleteEmployeeIds));
+        v.add(creatorEmpId);
+        e.add(creatorEmpId);
+        d.add(creatorEmpId);
+        update.permissions = {
+          viewEmployeeIds: Array.from(v),
+          editEmployeeIds: Array.from(e),
+          deleteEmployeeIds: Array.from(d)
+        };
+      } else {
+        update.permissions = normalized;
+      }
+    }
     
     const folder = await Folder.findByIdAndUpdate(
       req.params.folderId,
@@ -338,7 +552,7 @@ router.put('/folders/:folderId', checkPermission('edit'), async (req, res) => {
       return res.status(404).json({ message: 'Folder not found' });
     }
     
-    res.json(folder);
+    res.json({ success: true, folder });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -348,47 +562,48 @@ router.post("/folders", async (req, res) => {
   try {
     console.log("FOLDER API BODY:", req.body);
 
-    const { name, createdBy, parentFolderId, parentId } = req.body;
+    const { name, createdBy, parentFolderId, parentId, viewEmployeeIds, editEmployeeIds, deleteEmployeeIds } = req.body;
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ message: "Folder name is required" });
     }
 
     const createdById = createdBy || (req.user && (req.user._id || req.user.userId || req.user.id)) || null;
+    const createdByEmployeeId = (req.user && req.user.employeeId) ? req.user.employeeId : null;
     const rawParent = parentFolderId || parentId || null;
     const resolvedParentFolder = rawParent && String(rawParent).trim() ? String(rawParent).trim() : null;
     if (resolvedParentFolder && !mongoose.Types.ObjectId.isValid(resolvedParentFolder)) {
       return res.status(400).json({ message: 'Invalid parentFolderId' });
     }
 
-    const rawPermissions = req.body.permissions;
-    let normalizedPermissions;
-    if (rawPermissions && typeof rawPermissions === 'object') {
-      const normalize = (value) => {
-        if (!value) return undefined;
-        if (Array.isArray(value)) return value;
-        if (typeof value === 'string') return [value];
-        return undefined;
-      };
-      normalizedPermissions = {
-        view: normalize(rawPermissions.view),
-        edit: normalize(rawPermissions.edit),
-        upload: normalize(rawPermissions.upload),
-        download: normalize(rawPermissions.download),
-        delete: normalize(rawPermissions.delete)
-      };
-      Object.keys(normalizedPermissions).forEach((key) => {
-        if (!normalizedPermissions[key]) delete normalizedPermissions[key];
-      });
-      if (Object.keys(normalizedPermissions).length === 0) normalizedPermissions = undefined;
+    const normalized = enforcePermissionHierarchy({
+      viewEmployeeIds,
+      editEmployeeIds,
+      deleteEmployeeIds
+    });
+
+    // Creator must always retain full access (prevents lockout)
+    if (createdByEmployeeId) {
+      const v = new Set(normalizeIdArray(normalized.viewEmployeeIds));
+      const e = new Set(normalizeIdArray(normalized.editEmployeeIds));
+      const d = new Set(normalizeIdArray(normalized.deleteEmployeeIds));
+      const creatorIdStr = createdByEmployeeId.toString();
+      v.add(creatorIdStr);
+      e.add(creatorIdStr);
+      d.add(creatorIdStr);
+      normalized.viewEmployeeIds = Array.from(v);
+      normalized.editEmployeeIds = Array.from(e);
+      normalized.deleteEmployeeIds = Array.from(d);
     }
 
     const folder = await Folder.create({
       name: name.trim(),
       description: req.body.description || '',
       createdBy: createdById,
+      createdByUserId: createdById,
+      createdByEmployeeId,
       parentFolder: resolvedParentFolder,
-      ...(normalizedPermissions ? { permissions: normalizedPermissions } : {}),
+      permissions: normalized,
     });
 
     console.log("✅ Folder created successfully:", folder);
@@ -628,20 +843,30 @@ router.get('/documents/:documentId/view', async (req, res) => {
     }
     
     // Check permissions
-    if (user.role !== 'admin' && user.role !== 'super-admin') {
-      const document = await DocumentManagement.findById(req.params.documentId);
-      if (!document) {
-        return res.status(404).json({ message: 'Document not found' });
-      }
-      if (!document.hasPermission('view', user)) {
-        return res.status(403).json({ message: 'Insufficient permissions' });
-      }
+    const isAdminLike = ADMIN_ROLES.includes(user.role);
+    if (!isAdminLike) {
+      await resolveEmployeeIdForUser(user);
     }
-    
+
     const document = await DocumentManagement.findById(req.params.documentId);
     
     if (!document) {
       return res.status(404).json({ message: 'Document not found' });
+    }
+
+    if (!isAdminLike) {
+      if (document.folderId) {
+        const folder = await Folder.findById(document.folderId);
+        if (!folder) {
+          return res.status(404).json({ message: 'Folder not found' });
+        }
+        if (!folder.hasPermission('view', user)) {
+          return res.status(403).json({ message: 'Insufficient permissions' });
+        }
+      }
+      if (!document.hasPermission('view', user)) {
+        return res.status(403).json({ message: 'Insufficient permissions' });
+      }
     }
     
     if (!document.fileData) {

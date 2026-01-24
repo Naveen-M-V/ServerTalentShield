@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { buildApiUrl } from './apiConfig';
 
 const API_BASE_URL = '/api/performance';
 
@@ -48,46 +47,60 @@ export const goalsApi = {
     getAllGoals: async (filters = {}) => {
         const params = new URLSearchParams();
         if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-        if (filters.assignee && filters.assignee !== 'all') params.append('assignee', filters.assignee);
+        if (filters.department) params.append('department', filters.department);
+        if (filters.employee) params.append('employee', filters.employee);
         if (filters.search) params.append('search', filters.search);
+        if (filters.approved && filters.approved !== 'all') {
+            params.append('approved', filters.approved === 'approved' ? 'true' : 'false');
+        }
 
-        const url = buildApiUrl(`/goals?${params.toString()}`);
-        const response = await axios.get(url, { withCredentials: true });
+        const url = `/goals?${params.toString()}`;
+        const response = await api.get(url);
         return response.data;
     },
 
     // Get my goals - FIXED to use correct endpoint
     getMyGoals: async () => {
-        const url = buildApiUrl('/goals/my');
-        const response = await axios.get(url, { withCredentials: true });
+        const response = await api.get('/goals/my-goals');
+        return response.data;
+    },
+
+    getSummaryAll: async () => {
+        const response = await api.get('/goals/summary/all');
         return response.data;
     },
 
     // Get goal by ID
     getGoalById: async (id) => {
-        const url = buildApiUrl(`/goals/${id}`);
-        const response = await axios.get(url, { withCredentials: true });
+        const response = await api.get(`/goals/${id}`);
         return response.data;
     },
 
     // Create new goal
     createGoal: async (goalData) => {
-        const url = buildApiUrl('/goals');
-        const response = await axios.post(url, goalData, { withCredentials: true });
+        const response = await api.post('/goals', goalData);
         return response.data;
     },
 
     // Update goal
     updateGoal: async (id, updates) => {
-        const url = buildApiUrl(`/goals/${id}`);
-        const response = await axios.put(url, updates, { withCredentials: true });
+        const response = await api.put(`/goals/${id}`, updates);
         return response.data;
     },
 
     // Delete goal
     deleteGoal: async (id) => {
-        const url = buildApiUrl(`/goals/${id}`);
-        const response = await axios.delete(url, { withCredentials: true });
+        const response = await api.delete(`/goals/${id}`);
+        return response.data;
+    },
+
+    approveGoal: async (id) => {
+        const response = await api.post(`/goals/${id}/approve`);
+        return response.data;
+    },
+
+    addComment: async (id, comment) => {
+        const response = await api.post(`/goals/${id}/comment`, { comment });
         return response.data;
     },
 };

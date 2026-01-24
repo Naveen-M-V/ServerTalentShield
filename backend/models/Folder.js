@@ -27,41 +27,21 @@ const folderSchema = new mongoose.Schema({
 
   // Access Control
   permissions: {
-    view: {
-      type: [{
-        type: String,
-        enum: ['admin', 'employee']
-      }],
-      default: ['admin']
-    },
-    edit: {
-      type: [{
-        type: String,
-        enum: ['admin', 'employee']
-      }],
-      default: ['admin']
-    },
-    upload: {
-      type: [{
-        type: String,
-        enum: ['admin', 'employee']
-      }],
-      default: ['admin']
-    },
-    download: {
-      type: [{
-        type: String,
-        enum: ['admin', 'employee']
-      }],
-      default: ['admin']
-    },
-    delete: {
-      type: [{
-        type: String,
-        enum: ['admin', 'employee']
-      }],
-      default: ['admin']
-    }
+    viewEmployeeIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'EmployeeHub',
+      index: true
+    }],
+    editEmployeeIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'EmployeeHub',
+      index: true
+    }],
+    deleteEmployeeIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'EmployeeHub',
+      index: true
+    }]
   },
   
   // Metadata
@@ -69,6 +49,21 @@ const folderSchema = new mongoose.Schema({
     type: String, // Changed from ObjectId to String for simplicity
     required: false,
     default: null
+  },
+
+  createdByUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null
+  },
+
+  createdByEmployeeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'EmployeeHub',
+    required: false,
+    default: null,
+    index: true
   },
   
   isActive: {
@@ -79,11 +74,40 @@ const folderSchema = new mongoose.Schema({
   timestamps: true // Automatically adds createdAt and updatedAt
 });
 
-// Instance method to check permission
-folderSchema.methods.hasPermission = function(action, userRole) {
-  if (userRole === 'admin') return true;
-  if (!this.permissions[action]) return false;
-  return this.permissions[action].includes(userRole);
+// Instance method to check permission (employee-based)
+folderSchema.methods.hasPermission = function(action, user) {
+  const role = user?.role || 'employee';
+  if (role === 'admin' || role === 'super-admin') return true;
+
+  const employeeId = user?.employeeId;
+  const empIdStr = employeeId ? employeeId.toString() : null;
+
+  const perms = this.permissions || {};
+  const viewIds = Array.isArray(perms.viewEmployeeIds) ? perms.viewEmployeeIds.map(v => v.toString()) : [];
+  const editIds = Array.isArray(perms.editEmployeeIds) ? perms.editEmployeeIds.map(v => v.toString()) : [];
+  const deleteIds = Array.isArray(perms.deleteEmployeeIds) ? perms.deleteEmployeeIds.map(v => v.toString()) : [];
+
+  // Prefer employee-based permissions when configured
+  const hasEmployeePerms = viewIds.length > 0 || editIds.length > 0 || deleteIds.length > 0;
+  if (hasEmployeePerms) {
+    if (!empIdStr) return false;
+    if (action === 'view' || action === 'download') {
+      return viewIds.includes(empIdStr) || editIds.includes(empIdStr) || deleteIds.includes(empIdStr);
+    }
+    if (action === 'edit' || action === 'upload') {
+      return editIds.includes(empIdStr) || deleteIds.includes(empIdStr);
+    }
+    if (action === 'delete') {
+      return deleteIds.includes(empIdStr);
+    }
+    return false;
+  }
+
+  // Legacy fallback (older folders)
+  const legacy = perms[action];
+  if (!legacy) return false;
+  if (!Array.isArray(legacy)) return false;
+  return legacy.includes(role);
 };
 
 // Prevent model re-compilation

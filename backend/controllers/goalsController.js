@@ -9,6 +9,80 @@
 
 const Goal = require('../models/Goal');
 const EmployeeHub = require('../models/EmployeesHub');
+const mongoose = require('mongoose');
+
+const resolveEmployeeForRequest = async (req) => {
+  const authId = req.user?.userId || req.user?.id || req.user?._id || req.session?.userId;
+  const authIdStr = authId ? String(authId).trim() : '';
+  const isValidObjectId = mongoose.Types.ObjectId.isValid(authIdStr);
+
+  let employee = null;
+
+  if (isValidObjectId) {
+    employee = await EmployeeHub.findById(authIdStr);
+  }
+
+  if (!employee && isValidObjectId) {
+    employee = await EmployeeHub.findOne({ userId: authIdStr });
+  }
+
+  if (!employee && req.user?.email) {
+    employee = await EmployeeHub.findOne({ email: String(req.user.email).toLowerCase() });
+  }
+
+  return employee;
+};
+
+/**
+ * Get goal by ID
+ * GET /api/goals/:id
+ */
+exports.getGoalById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userRole = req.user?.role || req.session?.role;
+    const isAdmin = ['admin', 'super-admin', 'hr'].includes(userRole);
+    const employee = await resolveEmployeeForRequest(req);
+
+    if (!isAdmin && !employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
+
+    const goal = await Goal.findById(id)
+      .populate('userId', 'firstName lastName email department')
+      .populate('createdBy', 'firstName lastName email')
+      .lean();
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Goal not found'
+      });
+    }
+
+    if (!isAdmin && goal.userId?.toString?.() !== employee._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to view this goal'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: goal
+    });
+  } catch (error) {
+    console.error('Error fetching goal:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch goal',
+      error: error.message
+    });
+  }
+};
 
 /**
  * Get user's goals
@@ -16,9 +90,15 @@ const EmployeeHub = require('../models/EmployeesHub');
  */
 exports.getUserGoals = async (req, res) => {
   try {
-    const userId = req.user?._id || req.session?.userId;
-    
-    const goals = await Goal.find({ userId })
+    const employee = await resolveEmployeeForRequest(req);
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
+
+    const goals = await Goal.find({ userId: employee._id })
       .select('-__v')
       .sort({ createdAt: -1 })
       .lean();
@@ -44,7 +124,7 @@ exports.getUserGoals = async (req, res) => {
  */
 exports.createGoal = async (req, res) => {
   try {
-    const { title, description, category, deadline, userId: targetUserId } = req.body;
+    const { title, description, category, deadline, userId: targetUserId, userIds } = req.body;
     const currentUserId = req.user?._id || req.session?.userId;
     const userRole = req.user?.role || req.session?.role;
     const isAdmin = ['admin', 'super-admin', 'hr'].includes(userRole);
@@ -57,38 +137,66 @@ exports.createGoal = async (req, res) => {
       });
     }
 
-    // Determine goal owner:
-    // - If admin provides userId in payload, use that (admin assigning to employee)
-    // - Otherwise, assign to current user (self-creation)
-    const goalOwnerId = (isAdmin && targetUserId) ? targetUserId : currentUserId;
+    let goalOwnerIds = [];
+    if (isAdmin) {
+      if (Array.isArray(userIds) && userIds.length > 0) {
+        goalOwnerIds = userIds;
+      } else if (targetUserId) {
+        goalOwnerIds = [targetUserId];
+      }
+    }
 
-    // Get employee details for the goal owner
-    const employee = await EmployeeHub.findById(goalOwnerId);
-    if (!employee) {
+    if (!goalOwnerIds.length) {
+      const employee = await resolveEmployeeForRequest(req);
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          message: 'Employee record not found'
+        });
+      }
+      goalOwnerIds = [employee._id];
+    }
+
+    // Get employee details for each goal owner
+    const employeeDocs = await EmployeeHub.find({ _id: { $in: goalOwnerIds } });
+    if (!employeeDocs.length) {
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
       });
     }
 
-    // Create goal
-    const goal = new Goal({
-      userId: goalOwnerId,
-      title: title.trim(),
-      description: description.trim(),
-      category: category || 'Other',
-      deadline: new Date(deadline),
-      employeeName: `${employee.firstName} ${employee.lastName}`,
-      department: employee.department,
-      createdBy: currentUserId
+    const employeeById = new Map(employeeDocs.map((e) => [e._id.toString(), e]));
+    const missing = goalOwnerIds.filter((id) => !employeeById.has(String(id)));
+    if (missing.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'One or more employees were not found',
+        missingUserIds: missing
+      });
+    }
+
+    const goalPayload = goalOwnerIds.map((id) => {
+      const employee = employeeById.get(String(id));
+      return {
+        userId: employee._id,
+        title: title.trim(),
+        description: description.trim(),
+        category: category || 'Other',
+        deadline: new Date(deadline),
+        employeeName: `${employee.firstName} ${employee.lastName}`,
+        department: employee.department,
+        createdBy: currentUserId
+      };
     });
 
-    await goal.save();
+    const createdGoals = await Goal.insertMany(goalPayload, { ordered: true });
 
     res.status(201).json({
       success: true,
       message: 'Goal created successfully',
-      data: goal
+      count: createdGoals.length,
+      data: createdGoals
     });
   } catch (error) {
     console.error('Error creating goal:', error);
@@ -108,8 +216,16 @@ exports.updateGoal = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, description, category, deadline, progress, status } = req.body;
-    const userId = req.user?._id || req.session?.userId;
     const userRole = req.user?.role || req.session?.role;
+    const isAdmin = ['admin', 'super-admin', 'hr'].includes(userRole);
+    const employee = await resolveEmployeeForRequest(req);
+
+    if (!isAdmin && !employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
 
     const goal = await Goal.findById(id);
     if (!goal) {
@@ -120,8 +236,7 @@ exports.updateGoal = async (req, res) => {
     }
 
     // Check permissions
-    if (goal.userId.toString() !== userId.toString() && 
-        userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
+    if (!isAdmin && goal.userId.toString() !== employee._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to update this goal'
@@ -129,7 +244,7 @@ exports.updateGoal = async (req, res) => {
     }
 
     // Users can only update if not approved
-    if (goal.userId.toString() === userId.toString() && goal.adminApproved) {
+    if (!isAdmin && goal.adminApproved) {
       return res.status(403).json({
         success: false,
         message: 'You cannot modify approved goals'
@@ -171,7 +286,16 @@ exports.updateGoal = async (req, res) => {
 exports.deleteGoal = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.session?.userId;
+    const userRole = req.user?.role || req.session?.role;
+    const isAdmin = ['admin', 'super-admin', 'hr'].includes(userRole);
+    const employee = await resolveEmployeeForRequest(req);
+
+    if (!isAdmin && !employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
 
     const goal = await Goal.findById(id);
     if (!goal) {
@@ -182,7 +306,7 @@ exports.deleteGoal = async (req, res) => {
     }
 
     // Users can only delete unapproved goals
-    if (goal.userId.toString() !== userId.toString()) {
+    if (!isAdmin && goal.userId.toString() !== employee._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'You can only delete your own goals'
