@@ -374,9 +374,19 @@ export default function Goals() {
     }
   };
 
-  const openDetail = (goal) => {
-    setDetailGoal(goal);
-    setShowDetail(true);
+  const openDetail = async (goal) => {
+    try {
+      // Fetch full goal details to get populated admin comments
+      const res = await goalsApi.getGoalById(goal._id);
+      const fullGoal = res?.data ?? res;
+      setDetailGoal(fullGoal);
+      setShowDetail(true);
+    } catch (err) {
+      console.error('Failed to load goal details', err);
+      // Fallback to using the goal we have
+      setDetailGoal(goal);
+      setShowDetail(true);
+    }
   };
 
   const statusCounts = useMemo(() => {
@@ -795,16 +805,22 @@ export default function Goals() {
             <div>
               <p className="text-xs font-semibold text-gray-500">Admin comments</p>
               {detailGoal.adminComments && detailGoal.adminComments.length > 0 ? (
-                <div className="space-y-2">
+                <div className="mt-2 space-y-2">
                   {detailGoal.adminComments.map((c, idx) => (
                     <div key={idx} className="rounded-md border bg-gray-50 px-3 py-2 text-sm text-gray-800">
-                      <p>{c.comment}</p>
-                      <p className="text-xs text-gray-500">{formatDate(c.addedAt)}</p>
+                      <p className="whitespace-pre-wrap">{c.comment}</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {c.addedBy?.firstName && c.addedBy?.lastName 
+                          ? `${c.addedBy.firstName} ${c.addedBy.lastName}` 
+                          : 'Admin'} 
+                        {' • '}
+                        {formatDate(c.addedAt)}
+                      </p>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-gray-500">No admin comments yet.</p>
+                <p className="mt-1 text-gray-500">No admin comments yet.</p>
               )}
             </div>
           </div>

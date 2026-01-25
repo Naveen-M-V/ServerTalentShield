@@ -54,6 +54,7 @@ exports.getGoalById = async (req, res) => {
     const goal = await Goal.findById(id)
       .populate('userId', 'firstName lastName email department')
       .populate('createdBy', 'firstName lastName email')
+      .populate('adminComments.addedBy', 'firstName lastName email')
       .lean();
 
     if (!goal) {
@@ -393,7 +394,6 @@ exports.approveGoal = async (req, res) => {
   try {
     const { id } = req.params;
     const userRole = req.user?.role || req.session?.role;
-    const userId = req.user?._id || req.session?.userId;
 
     // Only admins can approve
     if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
@@ -403,17 +403,26 @@ exports.approveGoal = async (req, res) => {
       });
     }
 
-    const goal = await Goal.findById(id);
+    // Use findByIdAndUpdate to avoid re-validating unchanged fields
+    // This prevents validation errors on denormalized fields (employeeName, department)
+    const goal = await Goal.findByIdAndUpdate(
+      id,
+      { 
+        adminApproved: true,
+        updatedAt: new Date()
+      },
+      { 
+        new: true,
+        runValidators: false  // Skip validation on fields we're not changing
+      }
+    ).populate('userId', 'firstName lastName email department');
+
     if (!goal) {
       return res.status(404).json({
         success: false,
         message: 'Goal not found'
       });
     }
-
-    goal.adminApproved = true;
-    goal.updatedAt = new Date();
-    await goal.save();
 
     res.json({
       success: true,
@@ -466,11 +475,15 @@ exports.addCommentToGoal = async (req, res) => {
 
     goal.adminComments.push({
       comment: comment.trim(),
-      addedBy: userId
+      addedBy: userId,
+      addedAt: new Date()
     });
 
     goal.updatedAt = new Date();
     await goal.save();
+
+    // Populate admin details for response
+    await goal.populate('adminComments.addedBy', 'firstName lastName email');
 
     res.json({
       success: true,

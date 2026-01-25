@@ -2,8 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { notesApi, pipsApi, goalsApi } from '../../utils/performanceApi';
 import { reviewsApi } from '../../utils/reviewsApi';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { toast } from 'react-toastify';
+import { useNavigate } from 'react-router-dom';
 
 const PerformanceTab = ({ user, userProfile }) => {
+  const navigate = useNavigate();
   const [reviews, setReviews] = useState([]);
   const [notes, setNotes] = useState([]);
   const [pips, setPips] = useState([]);
@@ -14,6 +17,10 @@ const PerformanceTab = ({ user, userProfile }) => {
 
   const [selectedReview, setSelectedReview] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState(null);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [showCommentModal, setShowCommentModal] = useState(false);
+  const [commentText, setCommentText] = useState('');
 
   const employeeId = userProfile?._id;
 
@@ -56,6 +63,85 @@ const PerformanceTab = ({ user, userProfile }) => {
     load();
   }, [employeeId, user]);
 
+  const loadGoals = async () => {
+    try {
+      const goalsResp = await goalsApi.getMyGoals();
+      const goalsData = goalsResp?.data || goalsResp?.goals || goalsResp;
+      setGoals(Array.isArray(goalsData) ? goalsData : []);
+    } catch (err) {
+      console.error('Failed to load goals', err);
+    }
+  };
+
+  const loadReviews = async () => {
+    try {
+      const myReviews = await reviewsApi.getMyReviews();
+      const reviewsData = myReviews?.data || myReviews?.reviews || myReviews;
+      setReviews(Array.isArray(reviewsData) ? reviewsData : []);
+    } catch (err) {
+      console.error('Failed to load reviews', err);
+    }
+  };
+
+  const handleCreateGoal = () => {
+    // Navigate to Goals page where creation is handled
+    navigate('/performance/goals');
+  };
+
+  const handleEditGoal = (goal) => {
+    setSelectedGoal(goal);
+    navigate('/performance/goals');
+  };
+
+  const handleDeleteGoal = async (goalId) => {
+    if (!window.confirm('Are you sure you want to delete this goal?')) return;
+    
+    try {
+      await goalsApi.deleteGoal(goalId);
+      toast.success('Goal deleted successfully');
+      await loadGoals();
+    } catch (error) {
+      console.error('Failed to delete goal', error);
+      toast.error(error.response?.data?.message || 'Failed to delete goal');
+    }
+  };
+
+  const handleViewGoal = async (goal) => {
+    try {
+      const res = await goalsApi.getGoalById(goal._id);
+      setSelectedGoal(res?.data || goal);
+      setShowGoalModal(true);
+    } catch (err) {
+      console.error('Failed to load goal details', err);
+      setSelectedGoal(goal);
+      setShowGoalModal(true);
+    }
+  };
+
+  const handleAddComment = (review) => {
+    setSelectedReview(review);
+    setCommentText('');
+    setShowCommentModal(true);
+  };
+
+  const handleSubmitComment = async () => {
+    if (!commentText.trim()) {
+      toast.error('Please enter a comment');
+      return;
+    }
+
+    try {
+      await reviewsApi.addEmployeeComment(selectedReview._id, commentText);
+      toast.success('Comment added successfully');
+      setShowCommentModal(false);
+      setCommentText('');
+      await loadReviews();
+    } catch (error) {
+      console.error('Failed to add comment', error);
+      toast.error(error.response?.data?.message || 'Failed to add comment');
+    }
+  };
+
   if (loading) return <div className="p-4">Loading performance...</div>;
 
   const formatDate = (date) => {
@@ -74,12 +160,24 @@ const PerformanceTab = ({ user, userProfile }) => {
       setShowReviewModal(true);
     } catch (err) {
       console.error('Failed to load review details', err);
-      setSelectedReview(null);
-      setShowReviewModal(false);
+      setSelectedReview(review);
+      setShowReviewModal(true);
+    }
+  };
+
+  const getApprovalBadge = (approval) => {
+    if (approval === 'Approved') {
+      return <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">Approved</span>;
+    } else if (approval === 'Rejected') {
+      return <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">Rejected</span>;
+    } else {
+      return <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">Pending</span>;
     }
   };
 
   const completedReviews = (Array.isArray(reviews) ? reviews : []).filter((r) => r?.status === 'COMPLETED');
+  const submittedReviews = (Array.isArray(reviews) ? reviews : []).filter((r) => r?.status === 'SUBMITTED');
+  const activeReviews = [...submittedReviews, ...completedReviews];
 
   const getGoalStatusBadge = (status) => {
     const statusColors = {
@@ -174,6 +272,15 @@ const PerformanceTab = ({ user, userProfile }) => {
         <div className="px-6 py-4 border-b border-gray-200 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="text-lg font-semibold text-gray-900">My Goals</div>
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+            <button
+              onClick={handleCreateGoal}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              New Goal
+            </button>
             <div className="flex-1 min-w-[280px]">
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -209,7 +316,22 @@ const PerformanceTab = ({ user, userProfile }) => {
         </div>
 
         {filteredGoals.length === 0 ? (
-          <div className="p-10 text-center text-gray-600">No goals found.</div>
+          <div className="p-10 text-center">
+            <svg className="h-16 w-16 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No goals found</h3>
+            <p className="text-gray-500 mb-4">Start by creating your first goal</p>
+            <button
+              onClick={handleCreateGoal}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium text-sm inline-flex items-center gap-2"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Create Goal
+            </button>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -219,22 +341,52 @@ const PerformanceTab = ({ user, userProfile }) => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Measurement</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approval</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredGoals.map((g) => (
-                  <tr key={g._id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900">{g.goalName || '-'}</div>
-                      <div className="text-sm text-gray-500 max-w-xl truncate">{g.description || ''}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(g.startDate)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(g.dueDate)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">{getGoalStatusBadge(g.status)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{g.measurementType || '-'}</td>
-                  </tr>
-                ))}
+                {filteredGoals.map((g) => {
+                  const isPending = g.approval === 'Pending' || !g.approval;
+                  const isApproved = g.approval === 'Approved';
+                  
+                  return (
+                    <tr key={g._id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-medium text-gray-900">{g.goalName || g.title || '-'}</div>
+                        <div className="text-sm text-gray-500 max-w-xl truncate">{g.description || ''}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(g.startDate)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(g.dueDate)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">{getGoalStatusBadge(g.status)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">{getApprovalBadge(g.approval)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-2">
+                        <button
+                          onClick={() => handleViewGoal(g)}
+                          className="text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          View
+                        </button>
+                        {isPending && (
+                          <>
+                            <button
+                              onClick={() => handleEditGoal(g)}
+                              className="text-indigo-600 hover:text-indigo-800 font-medium"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteGoal(g._id)}
+                              className="text-red-600 hover:text-red-800 font-medium"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -243,42 +395,67 @@ const PerformanceTab = ({ user, userProfile }) => {
 
       <div className="bg-white shadow rounded-lg overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <div className="text-lg font-semibold text-gray-900">Review History</div>
-          <div className="text-sm text-gray-500 mt-1">Completed reviews are read-only.</div>
+          <div className="text-lg font-semibold text-gray-900">My Reviews</div>
+          <div className="text-sm text-gray-500 mt-1">View and comment on your performance reviews</div>
         </div>
 
-        {completedReviews.length === 0 ? (
-          <div className="p-10 text-center text-gray-600">No completed reviews yet.</div>
+        {activeReviews.length === 0 ? (
+          <div className="p-10 text-center">
+            <svg className="h-16 w-16 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No reviews yet</h3>
+            <p className="text-gray-500">Your manager hasn't created a review for you yet.</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Discussion Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completed</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rating</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {completedReviews.map((r) => (
-                  <tr key={r._id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.reviewType || '-'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(r.discussionDate)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(r.completedAt)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.managerFeedback?.rating ?? '-'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                      <button
-                        type="button"
-                        onClick={() => openReviewDetail(r)}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {activeReviews.map((r) => {
+                  const isSubmitted = r.status === 'SUBMITTED';
+                  
+                  return (
+                    <tr key={r._id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.reviewType || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          r.status === 'SUBMITTED' ? 'bg-yellow-100 text-yellow-800' :
+                          r.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {r.status || '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{formatDate(r.discussionDate)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{r.managerFeedback?.rating ?? '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-2">
+                        <button
+                          onClick={() => openReviewDetail(r)}
+                          className="text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          View
+                        </button>
+                        {isSubmitted && (
+                          <button
+                            onClick={() => handleAddComment(r)}
+                            className="text-green-600 hover:text-green-800 font-medium"
+                          >
+                            Add Comment
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -289,13 +466,13 @@ const PerformanceTab = ({ user, userProfile }) => {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b px-6 py-4">
-              <h3 className="text-lg font-semibold text-gray-900">Review details</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Review Details</h3>
               <button
                 onClick={() => {
                   setShowReviewModal(false);
                   setSelectedReview(null);
                 }}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
               >
                 ×
               </button>
@@ -309,13 +486,13 @@ const PerformanceTab = ({ user, userProfile }) => {
                       <p className="text-sm text-gray-900">{selectedReview.status || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-gray-500">Review type</p>
+                      <p className="text-xs font-semibold text-gray-500">Review Type</p>
                       <p className="text-sm text-gray-900">{selectedReview.reviewType || '-'}</p>
                     </div>
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold text-gray-500">Manager feedback</p>
+                    <p className="text-xs font-semibold text-gray-500">Manager Feedback</p>
                     {selectedReview.managerFeedback?.rating || selectedReview.managerFeedback?.feedback || selectedReview.managerFeedback?.areasForImprovement ? (
                       <div className="rounded-md border bg-gray-50 px-3 py-2">
                         <p className="font-semibold text-gray-900">Rating: {selectedReview.managerFeedback?.rating ?? '-'}</p>
@@ -332,7 +509,7 @@ const PerformanceTab = ({ user, userProfile }) => {
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold text-gray-500">Your comment</p>
+                    <p className="text-xs font-semibold text-gray-500">Your Comment</p>
                     {selectedReview.employeeComment?.comment ? (
                       <div className="rounded-md border bg-gray-50 px-3 py-2">
                         <p className="text-gray-900 whitespace-pre-wrap">{selectedReview.employeeComment.comment}</p>
@@ -358,6 +535,141 @@ const PerformanceTab = ({ user, userProfile }) => {
                 className="rounded-md px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGoalModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Goal Details</h3>
+              <button
+                onClick={() => {
+                  setShowGoalModal(false);
+                  setSelectedGoal(null);
+                }}
+                className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+              {selectedGoal ? (
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500">Title</p>
+                    <p className="text-base text-gray-900 font-medium">{selectedGoal.goalName || selectedGoal.title || '-'}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500">Description</p>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedGoal.description || '-'}</p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Status</p>
+                      <div className="mt-1">{getGoalStatusBadge(selectedGoal.status)}</div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Approval</p>
+                      <div className="mt-1">{getApprovalBadge(selectedGoal.approval)}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Start Date</p>
+                      <p className="text-sm text-gray-900">{formatDate(selectedGoal.startDate)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Due Date</p>
+                      <p className="text-sm text-gray-900">{formatDate(selectedGoal.dueDate)}</p>
+                    </div>
+                  </div>
+
+                  {selectedGoal.adminComments && selectedGoal.adminComments.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 mb-2">Manager Comments</p>
+                      <div className="space-y-2">
+                        {selectedGoal.adminComments.map((comment, idx) => (
+                          <div key={idx} className="rounded-md border bg-gray-50 px-3 py-2">
+                            <p className="text-sm text-gray-900">{comment.comment || comment}</p>
+                            {comment.addedBy && (
+                              <p className="mt-1 text-xs text-gray-500">
+                                By {comment.addedBy} {comment.addedAt && `on ${formatDate(comment.addedAt)}`}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-gray-600">Loading...</div>
+              )}
+            </div>
+            <div className="border-t px-6 py-4 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowGoalModal(false);
+                  setSelectedGoal(null);
+                }}
+                className="rounded-md px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCommentModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Add Comment</h3>
+              <button
+                onClick={() => {
+                  setShowCommentModal(false);
+                  setCommentText('');
+                }}
+                className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Your Comment
+              </label>
+              <textarea
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                rows={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                placeholder="Share your thoughts on this review..."
+              />
+            </div>
+            <div className="border-t px-6 py-4 flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowCommentModal(false);
+                  setCommentText('');
+                }}
+                className="rounded-md px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitComment}
+                className="rounded-md px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700"
+              >
+                Submit Comment
               </button>
             </div>
           </div>
