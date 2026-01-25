@@ -53,7 +53,7 @@ export const NotificationProvider = ({ children }) => {
       }
 
       const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5004';
-      const response = await fetch(`${API_BASE_URL}/api/notifications`, {
+      const response = await fetch(`${API_BASE_URL}/notifications`, {
         credentials: 'include',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -144,7 +144,7 @@ export const NotificationProvider = ({ children }) => {
       }
 
       const API_BASE_URL = process.env.REACT_APP_API_URL || process.env.REACT_APP_API_BASE_URL;
-      const response = await fetch(`${API_BASE_URL}/api/notifications/${notificationId}/read`, {
+      const response = await fetch(`${API_BASE_URL}/notifications/${notificationId}/read`, {
         method: 'PUT',
         credentials: 'include',
         headers: {

@@ -9,14 +9,47 @@
 
 const Review = require('../models/Review');
 const EmployeeHub = require('../models/EmployeesHub');
+const mongoose = require('mongoose');
 
+// Admin roles that have full manager permissions
 const ADMIN_ROLES = ['admin', 'super-admin', 'hr'];
+// Manager roles include all admin roles plus regular managers
+// This ensures admin/super-admin from EmployeeHub can create and manage reviews
 const MANAGER_ROLES = [...ADMIN_ROLES, 'manager'];
 
 const getUserId = (req) => req.user?._id || req.user?.id || req.session?.userId;
 const getUserRole = (req) => req.user?.role || req.session?.role;
 const isManager = (req) => MANAGER_ROLES.includes(getUserRole(req));
 const getUserModel = (req) => (req.user?.userType === 'profile' ? 'User' : 'EmployeeHub');
+
+/**
+ * Resolve employee ID for authenticated user
+ * This handles the mapping from auth User ID to EmployeeHub ID
+ */
+const resolveEmployeeForRequest = async (req) => {
+  const authId = req.user?.userId || req.user?.id || req.user?._id || req.session?.userId;
+  const authIdStr = authId ? String(authId).trim() : '';
+  const isValidObjectId = mongoose.Types.ObjectId.isValid(authIdStr);
+
+  let employee = null;
+
+  // Try as EmployeeHub _id first (employee login tokens)
+  if (isValidObjectId) {
+    employee = await EmployeeHub.findById(authIdStr);
+  }
+
+  // Try as User _id link (profile/admin tokens)
+  if (!employee && isValidObjectId) {
+    employee = await EmployeeHub.findOne({ userId: authIdStr });
+  }
+
+  // Fallback: email match
+  if (!employee && req.user?.email) {
+    employee = await EmployeeHub.findOne({ email: String(req.user.email).toLowerCase() });
+  }
+
+  return employee;
+};
 
 const validateReviewType = (reviewType) => ['ANNUAL', 'PROBATION', 'AD_HOC'].includes(reviewType);
 const trimOrNull = (v) => {
@@ -38,13 +71,26 @@ const validateRatingOrNull = (rating) => {
  */
 exports.getMyReviews = async (req, res) => {
   try {
-    const employeeId = getUserId(req);
-    if (!employeeId) {
+    const authId = getUserId(req);
+    if (!authId) {
       return res.status(401).json({
         success: false,
         message: 'Authentication required'
       });
     }
+
+    // Resolve to EmployeeHub ID
+    const employee = await resolveEmployeeForRequest(req);
+    if (!employee) {
+      console.warn('⚠️ getMyReviews: Employee record not found for user:', authId);
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
+
+    const employeeId = employee._id;
+    console.log('📋 Fetching reviews for employee:', employeeId);
 
     const query = { employeeId };
     const reviews = await Review.find(query)
@@ -53,7 +99,10 @@ exports.getMyReviews = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    // Filter out DRAFT reviews (employees shouldn't see manager's drafts)
     const filtered = reviews.filter((r) => r.status !== 'DRAFT');
+
+    console.log(`✅ Found ${filtered.length} reviews for employee ${employeeId}`);
 
     res.json({
       success: true,
@@ -61,10 +110,11 @@ exports.getMyReviews = async (req, res) => {
       data: filtered
     });
   } catch (error) {
-    console.error('Error fetching my reviews:', error);
+    console.error('❌ Error fetching my reviews:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch reviews'
+      message: 'Failed to fetch reviews',
+      error: error.message
     });
   }
 };
@@ -111,7 +161,6 @@ exports.listReviews = async (req, res) => {
 exports.getReview = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = getUserId(req);
 
     const review = await Review.findById(id)
       .populate('employeeId', 'firstName lastName email department employeeId');
@@ -125,7 +174,18 @@ exports.getReview = async (req, res) => {
 
     const managerView = isManager(req);
     if (!managerView) {
-      const isOwner = userId && review.employeeId?._id?.toString() === userId.toString();
+      // Resolve employee ID from authenticated user
+      const employee = await resolveEmployeeForRequest(req);
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          message: 'Employee record not found'
+        });
+      }
+
+      const employeeId = employee._id;
+      const isOwner = employeeId && review.employeeId?._id?.toString() === employeeId.toString();
+      
       if (!isOwner || review.status === 'DRAFT') {
         return res.status(403).json({
           success: false,
@@ -141,7 +201,7 @@ exports.getReview = async (req, res) => {
       data: payload
     });
   } catch (error) {
-    console.error('Error fetching review:', error);
+    console.error('❌ Error fetching review:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch review',
@@ -152,7 +212,22 @@ exports.getReview = async (req, res) => {
 
 exports.createReview = async (req, res) => {
   try {
+    const userRole = getUserRole(req);
+    const userId = getUserId(req);
+    const userModel = getUserModel(req);
+    
+    console.log('👤 Review creation attempt:', {
+      userId,
+      userRole,
+      userModel,
+      userType: req.user?.userType,
+      isManager: isManager(req),
+      isAdmin: ADMIN_ROLES.includes(userRole),
+      isSuperAdmin: userRole === 'super-admin'
+    });
+
     if (!isManager(req)) {
+      console.log('❌ Access denied - not a manager/admin');
       return res.status(403).json({
         success: false,
         message: 'Manager/HR access required'
@@ -191,8 +266,14 @@ exports.createReview = async (req, res) => {
       });
     }
 
-    const userId = getUserId(req);
     const model = getUserModel(req);
+
+    console.log('📝 Creating review with:', {
+      createdBy: userId,
+      createdByModel: model,
+      userRole,
+      forEmployee: employeeId
+    });
 
     const review = await Review.create({
       employeeId,
@@ -210,6 +291,13 @@ exports.createReview = async (req, res) => {
       createdByModel: model,
       updatedBy: userId,
       updatedByModel: model
+    });
+
+    console.log('✅ Review created successfully:', {
+      reviewId: review._id,
+      createdBy: review.createdBy,
+      createdByModel: review.createdByModel,
+      status: review.status
     });
 
     res.status(201).json({
@@ -352,8 +440,17 @@ exports.addEmployeeComment = async (req, res) => {
       });
     }
 
-    const userId = getUserId(req);
-    const isOwner = userId && review.employeeId?.toString() === userId.toString();
+    // Resolve employee ID from authenticated user
+    const employee = await resolveEmployeeForRequest(req);
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
+
+    const employeeId = employee._id;
+    const isOwner = employeeId && review.employeeId?.toString() === employeeId.toString();
     if (!isOwner) {
       return res.status(403).json({
         success: false,
@@ -389,6 +486,7 @@ exports.addEmployeeComment = async (req, res) => {
       });
     }
 
+    const userId = getUserId(req);
     review.employeeComment = {
       comment,
       updatedAt: new Date()
@@ -397,15 +495,19 @@ exports.addEmployeeComment = async (req, res) => {
     review.updatedByModel = getUserModel(req);
 
     await review.save();
+    
+    console.log(`✅ Employee comment added to review ${review._id} by employee ${employeeId}`);
+    
     res.json({
       success: true,
       data: review
     });
   } catch (error) {
-    console.error('Error adding employee comment:', error);
+    console.error('❌ Error adding employee comment:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to add comment'
+      message: 'Failed to add comment',
+      error: error.message
     });
   }
 };

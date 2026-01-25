@@ -448,10 +448,10 @@ exports.addCommentToGoal = async (req, res) => {
     const { id } = req.params;
     const { comment } = req.body;
     const userRole = req.user?.role || req.session?.role;
-    const userId = req.user?._id || req.session?.userId;
+    const userId = req.user?._id || req.user?.id || req.session?.userId;
 
     // Only admins can comment
-    if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
+    if (!['admin', 'super-admin', 'hr'].includes(userRole)) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to comment on goals'
@@ -465,6 +465,13 @@ exports.addCommentToGoal = async (req, res) => {
       });
     }
 
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
     const goal = await Goal.findById(id);
     if (!goal) {
       return res.status(404).json({
@@ -473,17 +480,23 @@ exports.addCommentToGoal = async (req, res) => {
       });
     }
 
+    // Determine the model type for the user
+    const userModel = req.user?.userType === 'employee' ? 'EmployeeHub' : 'User';
+
     goal.adminComments.push({
       comment: comment.trim(),
       addedBy: userId,
+      addedByModel: userModel,
       addedAt: new Date()
     });
 
     goal.updatedAt = new Date();
     await goal.save();
 
-    // Populate admin details for response
-    await goal.populate('adminComments.addedBy', 'firstName lastName email');
+    // Populate admin details for response - populate both possible models
+    await goal.populate([
+      { path: 'adminComments.addedBy', select: 'firstName lastName email' }
+    ]);
 
     res.json({
       success: true,

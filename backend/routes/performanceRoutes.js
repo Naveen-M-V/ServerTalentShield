@@ -3,16 +3,16 @@ const router = express.Router();
 const performanceController = require('../controllers/performanceController');
 const goalsController = require('../controllers/goalsController');
 
-// Goal routes
+// Goal routes - Specific routes MUST come before parameterized routes
 router.get('/goals/my-goals', goalsController.getUserGoals);
 router.get('/goals/summary/all', goalsController.getGoalsSummary);
-router.get('/goals/:id', goalsController.getGoalById);
+router.get('/goals', goalsController.getAllGoals);
 router.post('/goals', goalsController.createGoal);
+router.get('/goals/:id', goalsController.getGoalById);
 router.put('/goals/:id', goalsController.updateGoal);
 router.delete('/goals/:id', goalsController.deleteGoal);
 router.post('/goals/:id/approve', goalsController.approveGoal);
 router.post('/goals/:id/comment', goalsController.addCommentToGoal);
-router.get('/goals', goalsController.getAllGoals);
 
 // ⚠️ DEPRECATED: Review routes moved to /api/reviews endpoint
 // DO NOT USE /api/performance/reviews* - Use /api/reviews* instead

@@ -87,7 +87,13 @@ const goalSchema = new mongoose.Schema({
     },
     addedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      // Can be either User (admin) or EmployeeHub
+      refPath: 'adminComments.addedByModel'
+    },
+    addedByModel: {
+      type: String,
+      enum: ['User', 'EmployeeHub'],
+      default: 'User'
     },
     addedAt: {
       type: Date,

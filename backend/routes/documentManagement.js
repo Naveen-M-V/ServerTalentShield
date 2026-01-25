@@ -890,35 +890,86 @@ router.post('/documents',
   upload.single('file'),
   async (req, res) => {
     try {
+      console.log('📤 Document upload request received');
+      console.log('👤 User:', { 
+        id: req.user?._id || req.user?.userId || req.user?.id,
+        role: req.user?.role,
+        email: req.user?.email,
+        employeeId: req.user?.employeeId 
+      });
+      console.log('📋 Request body:', { 
+        category: req.body.category,
+        ownerId: req.body.ownerId,
+        hasFile: !!req.file
+      });
+
       const authenticatedUserId = req.user?._id || req.user?.userId || req.user?.id;
       if (!req.user || !authenticatedUserId) {
         if (req.file) {
           try { await fs.unlink(req.file.path); } catch {}
         }
+        console.error('❌ Authentication required');
         return res.status(401).json({ message: 'Authentication required' });
       }
       if (!req.file) {
+        console.error('❌ No file uploaded');
         return res.status(400).json({ message: 'No file uploaded' });
       }
 
       if (req.body.category === 'e_learning' && req.file.mimetype !== 'application/pdf') {
         try { await fs.unlink(req.file.path); } catch {}
+        console.error('❌ Invalid file type for e-learning');
         return res.status(400).json({ message: 'Invalid file type. Only PDF files are allowed for E-Learning documents.' });
       }
 
       // No folder provided
       const folderId = null;
 
-      const userRole = req.user.role === 'admin' ? 'admin' : 'employee';
+      // Check if user is admin using ADMIN_ROLES array
+      const isAdmin = ADMIN_ROLES.includes(req.user.role);
+      const userRole = isAdmin ? 'admin' : 'employee';
       const uploadedBy = authenticatedUserId;
       const uploadedByRole = userRole;
 
+      console.log('🔐 Role check:', { role: req.user.role, isAdmin, userRole });
+
+      // Determine document owner
       let ownerId = null;
-      if (userRole === 'employee') {
+      if (isAdmin) {
+        // Admin can upload for specific employee (ownerId in request) or for themselves
+        if (req.body.ownerId) {
+          ownerId = req.body.ownerId;
+          console.log('👤 Admin uploading for employee:', ownerId);
+        } else {
+          // Admin uploading for themselves - resolve their employee ID
+          const resolvedEmployeeId = await resolveEmployeeIdForRequest(req);
+          ownerId = resolvedEmployeeId;
+          console.log('👤 Admin uploading for self:', ownerId);
+        }
+      } else {
+        // Employee uploading for themselves
         ownerId = req.user.employeeId || req.body.ownerId || null;
-      } else if (req.body.ownerId) {
-        ownerId = req.body.ownerId;
+        console.log('👤 Employee uploading:', ownerId);
       }
+
+      // Validate ownerId exists
+      if (!ownerId) {
+        if (req.file) {
+          try { await fs.unlink(req.file.path); } catch {}
+        }
+        console.error('❌ Could not determine document owner');
+        return res.status(400).json({ 
+          message: 'Could not determine document owner. Please ensure employee exists.',
+          details: {
+            isAdmin,
+            userRole,
+            hasBodyOwnerId: !!req.body.ownerId,
+            hasEmployeeId: !!req.user.employeeId
+          }
+        });
+      }
+
+      console.log('✅ Document owner resolved:', ownerId);
 
       let accessControl = { visibility: 'all', allowedUserIds: [] };
       if (req.body.accessControl) {
@@ -933,7 +984,9 @@ router.post('/documents',
         accessControl = { visibility: 'employee', allowedUserIds: [uploadedBy] };
       }
 
+      console.log('📁 Reading file from disk:', req.file.path);
       const fileBuffer = await fs.readFile(req.file.path);
+      console.log('✅ File read successfully, size:', fileBuffer.length, 'bytes');
 
       const document = new DocumentManagement({
         name: req.file.originalname,
@@ -959,18 +1012,31 @@ router.post('/documents',
         auditLog: [{ action: 'uploaded', performedBy: uploadedBy, timestamp: new Date(), details: `Document uploaded by ${req.user.firstName || ''} ${req.user.lastName || ''}` }]
       });
 
+      console.log('💾 Saving document to database...');
       try { await fs.unlink(req.file.path); } catch {}
 
       await document.save();
+      console.log('✅ Document saved successfully:', document._id);
       await document.populate([
         { path: 'uploadedBy', select: 'firstName lastName email' },
         { path: 'ownerId', select: 'firstName lastName employeeId' }
       ]);
 
+      console.log('✅ Document upload complete:', document._id);
       res.status(201).json(document);
     } catch (error) {
+      console.error('❌ Document upload failed:', {
+        message: error.message,
+        stack: error.stack,
+        file: req.file?.originalname,
+        user: req.user?.email,
+        ownerId: req.body?.ownerId
+      });
       if (req.file) { try { await fs.unlink(req.file.path); } catch {} }
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ 
+        message: error.message,
+        error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   }
 );

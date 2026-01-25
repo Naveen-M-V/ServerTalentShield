@@ -117,6 +117,28 @@ function AdminProtectedRoute({ children }) {
   return children;
 }
 
+// Any Authenticated User Route (for performance pages - both employees and admins)
+function AuthenticatedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+}
+
 // Employee Protected Route Component (for EmployeeHub users)
 function EmployeeProtectedRoute({ children }) {
   const { isAuthenticated, loading, user } = useAuth();
@@ -400,11 +422,28 @@ function App() {
                     <Route path="/expenses/:id" element={<ViewExpense />} />
                     <Route path="/documents" element={<Documents />} />
                     <Route path="/documents/:folderId" element={<FolderView />} />
-                    <Route path="/performance/goals" element={<Goals />} />
-                    <Route path="/performance/reviews" element={<Reviews />} />
+                    {/* Performance routes removed from admin - now standalone below */}
                     {/* Admin performance routes removed */}
                     <Route path="/e-learning" element={<ELearning />} />
                   </Route>
+
+                  {/* Performance routes - accessible by both employees and admins */}
+                  <Route
+                    path="/performance/goals"
+                    element={
+                      <AuthenticatedRoute>
+                        <Goals />
+                      </AuthenticatedRoute>
+                    }
+                  />
+                  <Route
+                    path="/performance/reviews"
+                    element={
+                      <AuthenticatedRoute>
+                        <Reviews />
+                      </AuthenticatedRoute>
+                    }
+                  />
                 </Routes>
               </Router>
             </AdminClockInWrapper>
