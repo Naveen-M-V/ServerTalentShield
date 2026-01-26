@@ -422,28 +422,11 @@ function App() {
                     <Route path="/expenses/:id" element={<ViewExpense />} />
                     <Route path="/documents" element={<Documents />} />
                     <Route path="/documents/:folderId" element={<FolderView />} />
-                    {/* Performance routes removed from admin - now standalone below */}
-                    {/* Admin performance routes removed */}
+                    {/* Performance routes - accessible by authenticated users with layout */}
+                    <Route path="/performance/goals" element={<Goals />} />
+                    <Route path="/performance/reviews" element={<Reviews />} />
                     <Route path="/e-learning" element={<ELearning />} />
                   </Route>
-
-                  {/* Performance routes - accessible by both employees and admins */}
-                  <Route
-                    path="/performance/goals"
-                    element={
-                      <AuthenticatedRoute>
-                        <Goals />
-                      </AuthenticatedRoute>
-                    }
-                  />
-                  <Route
-                    path="/performance/reviews"
-                    element={
-                      <AuthenticatedRoute>
-                        <Reviews />
-                      </AuthenticatedRoute>
-                    }
-                  />
                 </Routes>
               </Router>
             </AdminClockInWrapper>

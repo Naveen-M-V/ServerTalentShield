@@ -24,7 +24,8 @@ import {
   Download,
   UserMinus,
   Trash2,
-  X
+  X,
+  Eye
 } from 'lucide-react';
 import axios from '../utils/axiosConfig';
 import AddLeaveModal from '../components/AddLeaveModal';
@@ -33,6 +34,7 @@ import { SicknessModal, LatenessModal, CarryoverModal } from '../components/Abse
 import TerminationFlowModal from '../components/TerminationFlowModal';
 import { useAuth } from '../context/AuthContext';
 import { buildApiUrl, buildDirectUrl } from '../utils/apiConfig';
+import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
 
 const EmployeeProfile = () => {
   const [showLeaveModal, setShowLeaveModal] = React.useState(false);
@@ -351,17 +353,46 @@ const EmployeeProfile = () => {
 
 // Absence Tab Component
 const AbsenceTab = ({ employee, onAddLeave, onAddTimeOff, onOpenCarryover, onOpenSickness, onOpenLateness }) => {
+  const [filterType, setFilterType] = useState('all');
+  const [filteredAbsences, setFilteredAbsences] = useState([]);
+
+  useEffect(() => {
+    if (!employee?.recentAbsences) {
+      setFilteredAbsences([]);
+      return;
+    }
+
+    const absences = employee.recentAbsences || [];
+    
+    if (filterType === 'all') {
+      setFilteredAbsences(absences);
+    } else if (filterType === 'thisMonth') {
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      setFilteredAbsences(absences.filter(a => new Date(a.date) >= firstDayOfMonth));
+    } else if (filterType === 'thisYear') {
+      const now = new Date();
+      const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+      setFilteredAbsences(absences.filter(a => new Date(a.date) >= firstDayOfYear));
+    } else {
+      setFilteredAbsences(absences);
+    }
+  }, [employee?.recentAbsences, filterType]);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
       {/* Left Side */}
       <div className="space-y-6">
         {/* Filter Dropdown */}
         <div className="relative">
-          <select className="w-full md:w-64 px-4 py-2 border border-gray-300 rounded-lg appearance-none bg-white">
-            <option>Filter absences</option>
-            <option>All absences</option>
-            <option>This month</option>
-            <option>This year</option>
+          <select 
+            className="w-full md:w-64 px-4 py-2 border border-gray-300 rounded-lg appearance-none bg-white"
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+          >
+            <option value="all">All absences</option>
+            <option value="thisMonth">This month</option>
+            <option value="thisYear">This year</option>
           </select>
           <ChevronDown className="absolute right-3 top-3 w-4 h-4 text-gray-400 pointer-events-none" />
         </div>
@@ -447,23 +478,25 @@ const AbsenceTab = ({ employee, onAddLeave, onAddTimeOff, onOpenCarryover, onOpe
             <h4 className="font-medium text-gray-900">Recent Absences</h4>
           </div>
           <div className="divide-y divide-gray-200">
-            {employee.recentAbsences?.map((absence, index) => (
-              <div key={index} className="p-4 flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-gray-900">{absence.type}</div>
-                  <div className="text-sm text-gray-500">{formatDateDDMMYY(absence.date)}</div>
+            {filteredAbsences.length > 0 ? (
+              filteredAbsences.map((absence, index) => (
+                <div key={index} className="p-4 flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-gray-900">{absence.type}</div>
+                    <div className="text-sm text-gray-500">{formatDateDDMMYY(absence.date)}</div>
+                  </div>
+                  <span className={`px-2 py-1 text-xs font-medium rounded ${
+                    absence.status === 'Approved' 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-yellow-100 text-yellow-800'
+                  }`}>
+                    {absence.status}
+                  </span>
                 </div>
-                <span className={`px-2 py-1 text-xs font-medium rounded ${
-                  absence.status === 'Approved' 
-                    ? 'bg-green-100 text-green-800' 
-                    : 'bg-yellow-100 text-yellow-800'
-                }`}>
-                  {absence.status}
-                </span>
-              </div>
-            )) || (
+              ))
+            ) : (
               <div className="p-4 text-center text-gray-500">
-                No absences recorded
+                No absences found for selected period
               </div>
             )}
           </div>
@@ -631,14 +664,391 @@ const EmploymentTab = ({ employee }) => {
   );
 };
 
-const OvertimeTab = ({ employee }) => (
-  <div className="bg-white border border-gray-200 rounded-lg p-6">
-    <h3 className="text-lg font-semibold text-gray-900 mb-4">Overtime Records</h3>
-    <div className="text-center text-gray-500 py-8">
-      Overtime tracking coming soon
+const OvertimeTab = ({ employee }) => {
+  const { user } = useAuth();
+  const [overtimeRecords, setOvertimeRecords] = useState([]);
+  const [totals, setTotals] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newEntry, setNewEntry] = useState({
+    date: '',
+    scheduledHours: '',
+    workedHours: '',
+    notes: ''
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const isAdmin = user?.role === 'admin' || user?.role === 'super-admin' || user?.role === 'hr';
+
+  useEffect(() => {
+    fetchOvertimeRecords();
+  }, [employee?._id]);
+
+  const fetchOvertimeRecords = async () => {
+    if (!employee?._id) return;
+    
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(
+        buildApiUrl(`/overtime/employee/${employee._id}`),
+        {
+          headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+          withCredentials: true
+        }
+      );
+
+      if (response.data.success) {
+        setOvertimeRecords(response.data.overtime || []);
+        setTotals(response.data.totals || {});
+      }
+    } catch (error) {
+      console.error('Error fetching overtime:', error);
+      alert('Failed to load overtime records');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmitEntry = async (e) => {
+    e.preventDefault();
+
+    // Validation
+    if (!newEntry.date || !newEntry.scheduledHours || !newEntry.workedHours) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    const scheduled = parseFloat(newEntry.scheduledHours);
+    const worked = parseFloat(newEntry.workedHours);
+
+    if (scheduled < 0 || worked < 0) {
+      alert('Hours cannot be negative');
+      return;
+    }
+
+    if (worked <= scheduled) {
+      alert('Worked hours must exceed scheduled hours to claim overtime');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.post(
+        buildApiUrl('/overtime/entry'),
+        {
+          date: newEntry.date,
+          scheduledHours: scheduled,
+          workedHours: worked,
+          notes: newEntry.notes
+        },
+        {
+          headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+          withCredentials: true
+        }
+      );
+
+      if (response.data.success) {
+        alert('Overtime entry submitted successfully');
+        setShowCreateModal(false);
+        setNewEntry({ date: '', scheduledHours: '', workedHours: '', notes: '' });
+        fetchOvertimeRecords();
+      }
+    } catch (error) {
+      console.error('Error submitting overtime:', error);
+      alert(error.response?.data?.message || 'Failed to submit overtime entry');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleApprove = async (overtimeId) => {
+    if (!confirm('Approve this overtime entry?')) return;
+
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.put(
+        buildApiUrl(`/overtime/approve/${overtimeId}`),
+        {},
+        {
+          headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+          withCredentials: true
+        }
+      );
+
+      if (response.data.success) {
+        alert('Overtime approved successfully');
+        fetchOvertimeRecords();
+      }
+    } catch (error) {
+      console.error('Error approving overtime:', error);
+      alert(error.response?.data?.message || 'Failed to approve overtime');
+    }
+  };
+
+  const handleReject = async (overtimeId) => {
+    const reason = prompt('Reason for rejection:');
+    if (!reason) return;
+
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.put(
+        buildApiUrl(`/overtime/reject/${overtimeId}`),
+        { reason },
+        {
+          headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+          withCredentials: true
+        }
+      );
+
+      if (response.data.success) {
+        alert('Overtime rejected successfully');
+        fetchOvertimeRecords();
+      }
+    } catch (error) {
+      console.error('Error rejecting overtime:', error);
+      alert(error.response?.data?.message || 'Failed to reject overtime');
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    const styles = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      approved: 'bg-green-100 text-green-800',
+      rejected: 'bg-red-100 text-red-800'
+    };
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg p-6">
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="text-gray-500 mt-2">Loading overtime records...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header with Stats */}
+      <div className="bg-white border border-gray-200 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Overtime Records</h3>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Clock className="w-4 h-4" />
+            <span>Log Overtime</span>
+          </button>
+        </div>
+
+        {/* Totals Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-600 font-medium">Total Overtime</p>
+            <p className="text-2xl font-bold text-blue-900">{totals.totalOvertimeHours || 0}h</p>
+          </div>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p className="text-sm text-yellow-600 font-medium">Pending</p>
+            <p className="text-2xl font-bold text-yellow-900">{totals.pendingHours || 0}h</p>
+          </div>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <p className="text-sm text-green-600 font-medium">Approved</p>
+            <p className="text-2xl font-bold text-green-900">{totals.approvedHours || 0}h</p>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-sm text-red-600 font-medium">Rejected</p>
+            <p className="text-2xl font-bold text-red-900">{totals.rejectedHours || 0}h</p>
+          </div>
+        </div>
+
+        {/* Records Table */}
+        {overtimeRecords.length === 0 ? (
+          <div className="text-center py-8 border-t border-gray-200 pt-6">
+            <Clock className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No overtime records found</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Log Overtime" to add your first entry</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-t border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Scheduled</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Worked</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Overtime</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Notes</th>
+                  {isAdmin && (
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Actions</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {overtimeRecords.map((record) => (
+                  <tr key={record._id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {formatDateDDMMYY(record.date)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{record.scheduledHours}h</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{record.workedHours}h</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-blue-600">{record.overtimeHours}h</td>
+                    <td className="px-4 py-3 text-sm">{getStatusBadge(record.approvalStatus)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {record.rejectionReason || record.notes || '-'}
+                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-sm">
+                        {record.approvalStatus === 'pending' && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleApprove(record._id)}
+                              className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleReject(record._id)}
+                              className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
+                        {record.approvalStatus !== 'pending' && (
+                          <span className="text-gray-400 text-xs">
+                            {record.approvedBy?.firstName} {record.approvedBy?.lastName}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Log Overtime</h3>
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmitEntry} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={newEntry.date}
+                  onChange={(e) => setNewEntry({ ...newEntry, date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Scheduled Hours <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={newEntry.scheduledHours}
+                  onChange={(e) => setNewEntry({ ...newEntry, scheduledHours: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., 8"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Worked Hours <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={newEntry.workedHours}
+                  onChange={(e) => setNewEntry({ ...newEntry, workedHours: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., 10"
+                  required
+                />
+              </div>
+
+              {newEntry.scheduledHours && newEntry.workedHours && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-sm text-blue-600">
+                    Overtime Hours: <span className="font-bold">
+                      {Math.max(0, parseFloat(newEntry.workedHours || 0) - parseFloat(newEntry.scheduledHours || 0)).toFixed(1)}h
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={newEntry.notes}
+                  onChange={(e) => setNewEntry({ ...newEntry, notes: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  rows="3"
+                  placeholder="Optional notes about this overtime..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Submitting...' : 'Submit Overtime'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 const PersonalTab = ({ employee }) => {
   return (
@@ -768,6 +1178,8 @@ const DocumentsTab = ({ employee }) => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showViewerModal, setShowViewerModal] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState(null);
   const [uploadForm, setUploadForm] = useState({
     file: null,
     category: 'other',
@@ -787,6 +1199,16 @@ const DocumentsTab = ({ employee }) => {
   const handleBackToFolders = () => {
     setSelectedFolder(null);
     setDocuments([]);
+  };
+
+  const handleViewDocument = (doc) => {
+    setSelectedDocument(doc);
+    setShowViewerModal(true);
+  };
+
+  const handleViewDocument = (doc) => {
+    setSelectedDocument(doc);
+    setShowViewerModal(true);
   };
 
   const handleDownload = (doc) => {
@@ -820,7 +1242,7 @@ const DocumentsTab = ({ employee }) => {
       }
 
       const token = localStorage.getItem('auth_token');
-      await axios.post(
+      const response = await axios.post(
         buildApiUrl(`/documentManagement/employees/${employee._id}/upload`),
         formData,
         {
@@ -836,8 +1258,16 @@ const DocumentsTab = ({ employee }) => {
       setShowUploadModal(false);
       setUploadForm({ file: null, category: 'other', description: '' });
       
-      // Refresh employee data
-      window.location.reload();
+      // Refresh employee data without page reload
+      await fetchEmployeeData();
+      
+      // If user is in a folder, refresh that folder's documents
+      if (selectedFolder) {
+        const updatedFolder = folders.find(f => (f.id || f._id) === (selectedFolder.id || selectedFolder._id));
+        if (updatedFolder) {
+          setDocuments(updatedFolder?.documents || updatedFolder?.files || []);
+        }
+      }
     } catch (error) {
       console.error('Upload error:', error);
       alert(error.response?.data?.message || 'Failed to upload document');
@@ -986,6 +1416,14 @@ const DocumentsTab = ({ employee }) => {
                   <div className="flex items-center space-x-2">
                     <button 
                       type="button"
+                      onClick={() => handleViewDocument(doc)}
+                      className="p-2 text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors"
+                      title="View document"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button 
+                      type="button"
                       onClick={() => handleDownload(doc)}
                       className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                       title="Download document"
@@ -1128,6 +1566,18 @@ const DocumentsTab = ({ employee }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Document Viewer Modal */}
+      {showViewerModal && selectedDocument && (
+        <DocumentViewer
+          document={selectedDocument}
+          onClose={() => {
+            setShowViewerModal(false);
+            setSelectedDocument(null);
+          }}
+          onDownload={handleDownload}
+        />
       )}
     </div>
   );

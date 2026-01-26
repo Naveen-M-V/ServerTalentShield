@@ -97,11 +97,21 @@ export default function Reviews() {
         setUser(res.data);
         const adminFlag = ADMIN_ROLES.includes(res.data.role);
         const managerFlag = MANAGER_ROLES.includes(res.data.role);
+        console.log('🎯 Reviews Page - User loaded:', {
+          role: res.data.role,
+          isAdmin: adminFlag,
+          isManager: managerFlag,
+          adminRoles: ADMIN_ROLES,
+          managerRoles: MANAGER_ROLES
+        });
         setIsAdmin(adminFlag);
         setIsManager(managerFlag);
         if (managerFlag) {
+          console.log('✅ Manager/Admin detected - Setting team tab');
           setActiveTab('team');
           fetchEmployees();
+        } else {
+          console.log('⚠️ Not a manager - staying on mine tab');
         }
       } catch (err) {
         console.error('Failed to load user', err);
@@ -326,9 +336,16 @@ export default function Reviews() {
                 </button>
               </div>
             )}
-            {isManager && activeTab === 'team' && (
+            {/* Admin/Super-admin/HR/Manager can ALWAYS create reviews */}
+            {isManager && (
               <button
-                onClick={openCreate}
+                onClick={() => {
+                  // Auto-switch to team tab when creating a review
+                  if (activeTab !== 'team') {
+                    setActiveTab('team');
+                  }
+                  openCreate();
+                }}
                 className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-700"
               >
                 + Create review
@@ -414,7 +431,30 @@ export default function Reviews() {
             <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-green-600"></div>
           </div>
         ) : reviews.length === 0 ? (
-          <div className="rounded-lg border bg-white py-16 text-center text-gray-600 shadow-sm">No reviews found.</div>
+          <div className="rounded-lg border bg-white py-16 text-center shadow-sm">
+            <div className="mx-auto max-w-md">
+              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <h3 className="mt-4 text-lg font-semibold text-gray-900">No reviews found</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                {isManager && activeTab === 'team' 
+                  ? "Get started by creating a review for one of your team members." 
+                  : "You don't have any performance reviews yet. Your manager will create reviews for you."}
+              </p>
+              {isManager && activeTab === 'team' && (
+                <button
+                  onClick={openCreate}
+                  className="mt-6 inline-flex items-center rounded-lg bg-green-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-green-700"
+                >
+                  <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Create your first review
+                </button>
+              )}
+            </div>
+          </div>
         ) : (
           <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
             <table className="min-w-full divide-y divide-gray-200">

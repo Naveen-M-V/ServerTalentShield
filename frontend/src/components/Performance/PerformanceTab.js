@@ -5,8 +5,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
 
+const ADMIN_ROLES = ['admin', 'super-admin', 'hr'];
+const MANAGER_ROLES = [...ADMIN_ROLES, 'manager'];
+
 const PerformanceTab = ({ user, userProfile }) => {
   const navigate = useNavigate();
+  const isManager = user?.role && MANAGER_ROLES.includes(user.role);
   const [reviews, setReviews] = useState([]);
   const [notes, setNotes] = useState([]);
   const [pips, setPips] = useState([]);
@@ -21,6 +25,9 @@ const PerformanceTab = ({ user, userProfile }) => {
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [showCreateGoalModal, setShowCreateGoalModal] = useState(false);
+  const [showEditGoalModal, setShowEditGoalModal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(null);
 
   const employeeId = userProfile?._id;
 
@@ -84,13 +91,13 @@ const PerformanceTab = ({ user, userProfile }) => {
   };
 
   const handleCreateGoal = () => {
-    // Navigate to Goals page where creation is handled
-    navigate('/performance/goals');
+    // Open create goal modal instead of navigating away
+    setShowCreateGoalModal(true);
   };
 
   const handleEditGoal = (goal) => {
-    setSelectedGoal(goal);
-    navigate('/performance/goals');
+    setEditingGoal(goal);
+    setShowEditGoalModal(true);
   };
 
   const handleDeleteGoal = async (goalId) => {
@@ -405,7 +412,11 @@ const PerformanceTab = ({ user, userProfile }) => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <h3 className="text-lg font-medium text-gray-900 mb-2">No reviews yet</h3>
-            <p className="text-gray-500">Your manager hasn't created a review for you yet.</p>
+            <p className="text-gray-500">
+              {isManager 
+                ? "You don't have any personal reviews yet. To manage team reviews, use the sidebar menu."
+                : "Your manager hasn't created a review for you yet."}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -671,6 +682,243 @@ const PerformanceTab = ({ user, userProfile }) => {
               >
                 Submit Comment
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Goal Modal */}
+      {showCreateGoalModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Create New Goal</h3>
+              <button
+                onClick={() => setShowCreateGoalModal(false)}
+                className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                try {
+                  await goalsApi.createGoal({
+                    title: formData.get('title'),
+                    description: formData.get('description'),
+                    category: formData.get('category') || 'Other',
+                    deadline: formData.get('deadline'),
+                    progress: 0,
+                    status: 'TO_DO'
+                  });
+                  toast.success('Goal created successfully');
+                  setShowCreateGoalModal(false);
+                  loadGoals();
+                } catch (err) {
+                  toast.error(err.response?.data?.message || 'Failed to create goal');
+                }
+              }}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Goal Title *</label>
+                    <input
+                      type="text"
+                      name="title"
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="e.g., Complete React certification"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                    <textarea
+                      name="description"
+                      required
+                      rows={4}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Describe your goal..."
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                      <select
+                        name="category"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      >
+                        <option value="Technical">Technical</option>
+                        <option value="Leadership">Leadership</option>
+                        <option value="Communication">Communication</option>
+                        <option value="Project">Project</option>
+                        <option value="Personal Development">Personal Development</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Deadline *</label>
+                      <input
+                        type="date"
+                        name="deadline"
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="border-t mt-6 pt-4 flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateGoalModal(false)}
+                    className="rounded-md px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-md px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700"
+                  >
+                    Create Goal
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Goal Modal */}
+      {showEditGoalModal && editingGoal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Edit Goal</h3>
+              <button
+                onClick={() => {
+                  setShowEditGoalModal(false);
+                  setEditingGoal(null);
+                }}
+                className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                try {
+                  await goalsApi.updateGoal(editingGoal._id, {
+                    title: formData.get('title'),
+                    description: formData.get('description'),
+                    category: formData.get('category'),
+                    deadline: formData.get('deadline'),
+                    progress: Number(formData.get('progress')) || 0,
+                    status: formData.get('status')
+                  });
+                  toast.success('Goal updated successfully');
+                  setShowEditGoalModal(false);
+                  setEditingGoal(null);
+                  loadGoals();
+                } catch (err) {
+                  toast.error(err.response?.data?.message || 'Failed to update goal');
+                }
+              }}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Goal Title *</label>
+                    <input
+                      type="text"
+                      name="title"
+                      required
+                      defaultValue={editingGoal.goalName || editingGoal.title}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                    <textarea
+                      name="description"
+                      required
+                      rows={4}
+                      defaultValue={editingGoal.description}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                      <select
+                        name="category"
+                        defaultValue={editingGoal.category}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      >
+                        <option value="Technical">Technical</option>
+                        <option value="Leadership">Leadership</option>
+                        <option value="Communication">Communication</option>
+                        <option value="Project">Project</option>
+                        <option value="Personal Development">Personal Development</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Deadline *</label>
+                      <input
+                        type="date"
+                        name="deadline"
+                        required
+                        defaultValue={editingGoal.dueDate?.slice(0, 10) || editingGoal.deadline?.slice(0, 10)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Progress (%)</label>
+                      <input
+                        type="number"
+                        name="progress"
+                        min="0"
+                        max="100"
+                        defaultValue={editingGoal.progress || 0}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <select
+                        name="status"
+                        defaultValue={editingGoal.status}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      >
+                        <option value="Not started">Not started</option>
+                        <option value="In progress">In progress</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Overdue">Overdue</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="border-t mt-6 pt-4 flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditGoalModal(false);
+                      setEditingGoal(null);
+                    }}
+                    className="rounded-md px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-md px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700"
+                  >
+                    Update Goal
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>

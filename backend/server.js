@@ -2824,7 +2824,9 @@ const expenseRoutes = require('./routes/expenseRoutes');
 const performanceRoutes = require('./routes/performanceRoutes');
 const certificatesRoutes = require('./routes/certificates');
 const goalsRoutes = require('./routes/goalsRoutes');
+const reviewRoutes = require('./routes/reviewRoutes');
 const elearningRoutes = require('./routes/elearningRoutes');
+const overtimeRoutes = require('./routes/overtimeRoutes');
 
 // Session-based authentication middleware
 const authenticateSession = async (req, res, next) => {
@@ -3465,11 +3467,13 @@ app.use('/api/performance', authenticateSession, performanceRoutes);
 app.use('/api/goals', authenticateSession, goalsRoutes);
 
 // Review management (formal performance reviews)
-const reviewRoutes = require('./routes/reviewRoutes');
 app.use('/api/reviews', authenticateSession, reviewRoutes);
 
 // E-Learning management (simple document-based learning)
 app.use('/api/elearning', authenticateSession, elearningRoutes);
+
+// Overtime management (employee overtime tracking and approval)
+app.use('/api/overtime', authenticateSession, overtimeRoutes);
 
 // Global Error Handler Middleware (must be after all routes)
 

@@ -136,8 +136,14 @@ export default function Goals() {
         const resolvedUser = res.data?.data?.user ?? res.data?.user ?? res.data;
         setUser(resolvedUser);
         const adminFlag = ADMIN_ROLES.includes(resolvedUser?.role);
+        console.log('🎯 Goals Page - User loaded:', {
+          role: resolvedUser?.role,
+          isAdmin: adminFlag,
+          adminRoles: ADMIN_ROLES
+        });
         setIsAdmin(adminFlag);
         if (adminFlag) {
+          console.log('✅ Admin detected - Setting team tab');
           setActiveTab('team');
           fetchSummary();
           fetchEmployees();

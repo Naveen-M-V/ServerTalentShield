@@ -5,6 +5,8 @@ const AnnualLeaveBalance = require('../models/AnnualLeaveBalance');
 const LeaveRecord = require('../models/LeaveRecord');
 const Folder = require('../models/Folder');
 const DocumentManagement = require('../models/DocumentManagement');
+const LatenessRecord = require('../models/LatenessRecord');
+const DisciplinaryRecord = require('../models/DisciplinaryRecord');
 
 // Get employee by ID with complete profile data
 router.get('/:id', async (req, res) => {
@@ -96,10 +98,23 @@ router.get('/:id', async (req, res) => {
       remaining: 28
     };
 
-    // Count sickness and lateness occurrences (you can add these models later)
+    // Count sickness and lateness occurrences
+    const latenessCount = await LatenessRecord.countDocuments({ employee: req.params.id });
+    
+    // Count sickness from DisciplinaryRecord (type: 'sickness') and LeaveRecord (leaveType: 'Sick Leave' or 'Sick')
+    const sicknessRecords = await DisciplinaryRecord.countDocuments({
+      employeeId: req.params.id,
+      type: 'sickness'
+    });
+    
+    const sickLeaveRecords = await LeaveRecord.countDocuments({
+      user: req.params.id,
+      leaveType: { $in: ['Sick Leave', 'Sick', 'sick', 'sick leave'] }
+    });
+    
     const absencesData = {
-      sicknessCount: 0,  // TODO: Implement sickness tracking
-      latenessCount: 0   // TODO: Implement lateness tracking
+      sicknessCount: sicknessRecords + sickLeaveRecords,
+      latenessCount: latenessCount
     };
 
     // Format recent absences

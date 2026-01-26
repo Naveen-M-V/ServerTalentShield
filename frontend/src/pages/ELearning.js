@@ -358,11 +358,11 @@ await axios.post(
                 )}
                 
                 <div className="flex items-center gap-2">
-                  {material.mimeType?.includes('pdf') && (
+                  {(material.mimeType?.includes('pdf') || material.mimeType?.includes('presentation') || material.mimeType?.includes('powerpoint')) && (
                     <button
                       onClick={() => openPdfViewer(material)}
                       className="p-2 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
-                      title="View PDF"
+                      title={material.mimeType?.includes('pdf') ? 'View PDF' : 'View Presentation'}
                     >
                       <Eye className="w-4 h-4" />
                     </button>
@@ -478,67 +478,82 @@ await axios.post(
 
       {viewerOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-5xl shadow-xl">
+          <div className="bg-white rounded-lg w-full max-w-5xl shadow-xl max-h-[95vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">{viewerMaterial?.name || 'PDF Viewer'}</h2>
-                <p className="text-sm text-gray-500 mt-1">Swipe left/right or use arrows to change pages.</p>
+                <h2 className="text-xl font-semibold text-gray-900">{viewerMaterial?.name || 'Document Viewer'}</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {viewerMaterial?.mimeType?.includes('pdf') ? 'Swipe left/right or use arrows to change pages.' : 'Viewing presentation'}
+                </p>
               </div>
               <button onClick={closePdfViewer} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div
-              className="px-6 py-4 max-h-[75vh] overflow-auto"
-              onTouchStart={onTouchStart}
-              onTouchEnd={onTouchEnd}
+            <div className="flex-1 overflow-hidden px-6 py-4"
+              onTouchStart={viewerMaterial?.mimeType?.includes('pdf') ? onTouchStart : undefined}
+              onTouchEnd={viewerMaterial?.mimeType?.includes('pdf') ? onTouchEnd : undefined}
             >
               {pdfError ? (
                 <div className="p-8 text-center text-red-600">{pdfError}</div>
               ) : pdfLoading && !pdfDoc ? (
                 <div className="p-8 text-center text-gray-600">
                   <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <div className="mt-3">Loading PDF...</div>
+                  <div className="mt-3">Loading {getFileType(viewerMaterial?.mimeType)}...</div>
                 </div>
-              ) : (
-                <div className="flex justify-center">
-                  <canvas ref={canvasRef} className="max-w-full" />
+              ) : viewerMaterial?.mimeType?.includes('pdf') ? (
+                <div className="flex justify-center h-full items-center">
+                  <canvas ref={canvasRef} className="max-w-full shadow-lg" />
                 </div>
-              )}
+              ) : (viewerMaterial?.mimeType?.includes('presentation') || viewerMaterial?.mimeType?.includes('powerpoint')) ? (
+                <div className="h-full w-full">
+                  <iframe
+                    src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(buildDirectUrl(viewerMaterial.fileUrl))}`}
+                    className="w-full h-full border-0 rounded"
+                    title={viewerMaterial.name}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-                  disabled={!pdfDoc || pageNumber <= 1}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  Prev
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPageNumber((p) => (numPages ? Math.min(numPages, p + 1) : p))}
-                  disabled={!pdfDoc || (numPages ? pageNumber >= numPages : true)}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Next
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              {viewerMaterial?.mimeType?.includes('pdf') ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+                      disabled={!pdfDoc || pageNumber <= 1}
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPageNumber((p) => (numPages ? Math.min(numPages, p + 1) : p))}
+                      disabled={!pdfDoc || (numPages ? pageNumber >= numPages : true)}
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Next
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
 
-              <div className="text-sm text-gray-600">
-                {pdfDoc ? (
-                  <span>
-                    Page {pageNumber} of {numPages || '-'}
-                  </span>
-                ) : (
-                  <span>—</span>
-                )}
-              </div>
+                  <div className="text-sm text-gray-600">
+                    {pdfDoc ? (
+                      <span>
+                        Page {pageNumber} of {numPages || '-'}
+                      </span>
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div></div>
+              )}
 
               <button
                 onClick={() => handleDownload(viewerMaterial)}
