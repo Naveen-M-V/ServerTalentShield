@@ -11,6 +11,18 @@ const MANAGER_ROLES = [...ADMIN_ROLES, 'manager'];
 const PerformanceTab = ({ user, userProfile }) => {
   const navigate = useNavigate();
   const isManager = user?.role && MANAGER_ROLES.includes(user.role);
+  const isAdmin = user?.role && ADMIN_ROLES.includes(user.role);
+  
+  // Debug logging for role detection
+  console.log('🎯 PerformanceTab - User role detection:', {
+    userRole: user?.role,
+    userEmail: user?.email,
+    isManager,
+    isAdmin,
+    adminRoles: ADMIN_ROLES,
+    managerRoles: MANAGER_ROLES
+  });
+  
   const [reviews, setReviews] = useState([]);
   const [notes, setNotes] = useState([]);
   const [pips, setPips] = useState([]);
@@ -413,8 +425,8 @@ const PerformanceTab = ({ user, userProfile }) => {
             </svg>
             <h3 className="text-lg font-medium text-gray-900 mb-2">No reviews yet</h3>
             <p className="text-gray-500">
-              {isManager 
-                ? "You don't have any personal reviews yet. To manage team reviews, use the sidebar menu."
+              {isManager || isAdmin
+                ? "You don't have any personal reviews yet. To manage team reviews, navigate to Performance → Reviews from the sidebar."
                 : "Your manager hasn't created a review for you yet."}
             </p>
           </div>

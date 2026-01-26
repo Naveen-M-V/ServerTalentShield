@@ -12,22 +12,48 @@ const EmployeeHub = require('../models/EmployeesHub');
 const mongoose = require('mongoose');
 
 const resolveEmployeeForRequest = async (req) => {
-  const authId = req.user?.userId || req.user?.id || req.user?._id || req.session?.userId;
-  const authIdStr = authId ? String(authId).trim() : '';
-  const isValidObjectId = mongoose.Types.ObjectId.isValid(authIdStr);
+  if (!req.user) {
+    console.error('❌ No req.user found in request');
+    return null;
+  }
 
+  console.log('🔍 Resolving employee for user:', {
+    id: req.user.id,
+    _id: req.user._id,
+    userId: req.user.userId,
+    email: req.user.email
+  });
+
+  const authId = req.user._id || req.user.userId || req.user.id;
+  const authIdStr = authId ? String(authId).trim() : '';
   let employee = null;
 
-  if (isValidObjectId) {
-    employee = await EmployeeHub.findById(authIdStr);
-  }
-
-  if (!employee && isValidObjectId) {
+  // Try finding by userId field in EmployeesHub (User._id stored here)
+  if (authIdStr && mongoose.Types.ObjectId.isValid(authIdStr)) {
+    console.log('🔍 Searching by userId field:', authIdStr);
     employee = await EmployeeHub.findOne({ userId: authIdStr });
+    if (employee) {
+      console.log('✅ Found employee by userId field:', employee._id);
+    } else {
+      console.log('⚠️  No employee found by userId field, trying direct _id match');
+      employee = await EmployeeHub.findById(authIdStr);
+      if (employee) {
+        console.log('✅ Found employee by _id:', employee._id);
+      }
+    }
   }
 
-  if (!employee && req.user?.email) {
+  // Fall back to email lookup
+  if (!employee && req.user.email) {
+    console.log('🔍 Searching by email:', req.user.email);
     employee = await EmployeeHub.findOne({ email: String(req.user.email).toLowerCase() });
+    if (employee) {
+      console.log('✅ Found employee by email:', employee._id);
+    }
+  }
+
+  if (!employee) {
+    console.error('❌ Could not resolve employee for user:', req.user.email || req.user.id);
   }
 
   return employee;
@@ -244,22 +270,41 @@ exports.updateGoal = async (req, res) => {
       });
     }
 
-    // Users can only update if not approved
-    if (!isAdmin && goal.adminApproved) {
-      return res.status(403).json({
-        success: false,
-        message: 'You cannot modify approved goals'
+    // Track if we need to reset approval due to progress/status changes
+    const progressChanged = typeof progress === 'number' && progress !== goal.progress;
+    const statusChanged = status && status !== goal.status;
+
+    // If goal is approved and employee updates progress/status, reset approval for re-review
+    if (!isAdmin && goal.adminApproved && (progressChanged || statusChanged)) {
+      goal.adminApproved = false;
+      console.log('📊 Goal approval reset due to progress/status update by employee');
+      
+      // Add automatic comment about approval reset
+      if (!goal.adminComments) goal.adminComments = [];
+      goal.adminComments.push({
+        comment: `Approval reset - Employee updated ${progressChanged ? 'progress' : 'status'}. Requires admin re-approval.`,
+        addedBy: employee._id,
+        addedByModel: 'EmployeeHub',
+        addedAt: new Date()
       });
     }
 
     // Update allowed fields
-    if (title) goal.title = title.trim();
-    if (description) goal.description = description.trim();
-    if (category) goal.category = category;
-    if (deadline) goal.deadline = new Date(deadline);
+    if (title && !goal.adminApproved) goal.title = title.trim();
+    if (description && !goal.adminApproved) goal.description = description.trim();
+    if (category && !goal.adminApproved) goal.category = category;
+    if (deadline && !goal.adminApproved) goal.deadline = new Date(deadline);
     if (typeof progress === 'number') goal.progress = Math.min(Math.max(progress, 0), 100);
     if (status && ['TO_DO', 'IN_PROGRESS', 'ACHIEVED', 'OVERDUE'].includes(status)) {
       goal.status = status;
+    }
+
+    // If admin updates, they can modify anything
+    if (isAdmin) {
+      if (title) goal.title = title.trim();
+      if (description) goal.description = description.trim();
+      if (category) goal.category = category;
+      if (deadline) goal.deadline = new Date(deadline);
     }
 
     goal.updatedAt = new Date();

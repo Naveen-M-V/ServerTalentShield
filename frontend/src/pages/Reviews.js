@@ -94,11 +94,18 @@ export default function Reviews() {
     const loadUser = async () => {
       try {
         const res = await axios.get(buildApiUrl('/auth/me'), { withCredentials: true });
-        setUser(res.data);
-        const adminFlag = ADMIN_ROLES.includes(res.data.role);
-        const managerFlag = MANAGER_ROLES.includes(res.data.role);
+        console.log('🎯 Reviews Page - Raw API response:', res.data);
+        
+        // Backend returns: { success: true, data: { user: {...}, userType: 'employee' } }
+        // Extract user from nested structure
+        const userData = res.data?.data?.user || res.data?.user || res.data?.data || res.data;
+        
+        setUser(userData);
+        const adminFlag = ADMIN_ROLES.includes(userData.role);
+        const managerFlag = MANAGER_ROLES.includes(userData.role);
         console.log('🎯 Reviews Page - User loaded:', {
-          role: res.data.role,
+          role: userData.role,
+          email: userData.email,
           isAdmin: adminFlag,
           isManager: managerFlag,
           adminRoles: ADMIN_ROLES,
@@ -107,11 +114,19 @@ export default function Reviews() {
         setIsAdmin(adminFlag);
         setIsManager(managerFlag);
         if (managerFlag) {
-          console.log('✅ Manager/Admin detected - Setting team tab');
+          console.log('✅ Manager/Admin/Super-Admin detected - Setting team tab', {
+            role: userData.role,
+            canCreateReviews: true,
+            canManageTeam: true
+          });
           setActiveTab('team');
           fetchEmployees();
         } else {
-          console.log('⚠️ Not a manager - staying on mine tab');
+          console.log('⚠️ Regular employee - staying on mine tab', {
+            role: userData.role,
+            canCreateReviews: false,
+            canManageTeam: false
+          });
         }
       } catch (err) {
         console.error('Failed to load user', err);

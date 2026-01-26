@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const AnnualLeaveBalance = require('../models/AnnualLeaveBalance');
 const LeaveRecord = require('../models/LeaveRecord');
 const LeaveRequest = require('../models/LeaveRequest');
@@ -405,13 +406,43 @@ router.post('/records', async (req, res) => {
     console.log('Request body:', req.body);
     console.log('Authenticated user:', req.user);
     
-    const { userId, type, startDate, endDate, days, reason, status } = req.body;
+    let { userId, type, startDate, endDate, days, reason, status, notes } = req.body;
+    
+    // If userId not provided, resolve from authenticated user
+    if (!userId && req.user) {
+      console.log('🔍 No userId in body, resolving from authenticated user');
+      const authId = req.user._id || req.user.userId || req.user.id;
+      const authIdStr = authId ? String(authId).trim() : '';
+      
+      // Try finding employee by userId field
+      if (authIdStr && mongoose.Types.ObjectId.isValid(authIdStr)) {
+        let employee = await EmployeesHub.findOne({ userId: authIdStr }).select('_id');
+        if (!employee) {
+          employee = await EmployeesHub.findById(authIdStr).select('_id');
+        }
+        if (employee) {
+          userId = employee._id;
+          console.log('✅ Resolved employee from auth user:', userId);
+        }
+      }
+      
+      // Fall back to email lookup
+      if (!userId && req.user.email) {
+        const employee = await EmployeesHub.findOne({ 
+          email: String(req.user.email).toLowerCase() 
+        }).select('_id');
+        if (employee) {
+          userId = employee._id;
+          console.log('✅ Resolved employee from email:', userId);
+        }
+      }
+    }
     
     if (!userId || !startDate || !endDate || days === undefined) {
       console.error('Missing required fields:', { userId: !!userId, startDate: !!startDate, endDate: !!endDate, days });
       return res.status(400).json({
         success: false,
-        message: 'userId, startDate, endDate, and days are required'
+        message: !userId ? 'Could not find your employee profile. Please contact HR support.' : 'startDate, endDate, and days are required'
       });
     }
     
@@ -436,6 +467,7 @@ router.post('/records', async (req, res) => {
       endDate: new Date(endDate),
       days,
       reason,
+      notes: notes || req.body.notes,
       createdBy: req.user?.id || null,
       approvedBy: status === 'approved' ? (req.user?.id || null) : null,
       approvedAt: status === 'approved' ? new Date() : null

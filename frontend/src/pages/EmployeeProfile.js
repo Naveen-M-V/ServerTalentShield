@@ -1183,7 +1183,9 @@ const DocumentsTab = ({ employee }) => {
   const [uploadForm, setUploadForm] = useState({
     file: null,
     category: 'other',
-    description: ''
+    description: '',
+    folderName: '',
+    createNewFolder: folders.length === 0
   });
   const [uploading, setUploading] = useState(false);
 
@@ -1219,10 +1221,13 @@ const DocumentsTab = ({ employee }) => {
   };
 
   const handleUpload = () => {
-    if (!isAdmin) {
-      alert('Only administrators can upload documents');
-      return;
-    }
+    setUploadForm({ 
+      file: null, 
+      category: 'other', 
+      description: '',
+      folderName: '',
+      createNewFolder: folders.length === 0 
+    });
     setShowUploadModal(true);
   };
 
@@ -1232,18 +1237,59 @@ const DocumentsTab = ({ employee }) => {
       return;
     }
 
+    if (uploadForm.createNewFolder && !uploadForm.folderName?.trim()) {
+      alert('Please enter a folder name');
+      return;
+    }
+
     try {
       setUploading(true);
+      const token = localStorage.getItem('auth_token');
+      
+      // Step 1: Create folder if needed
+      let folderId = selectedFolder?._id;
+      
+      if (uploadForm.createNewFolder) {
+        const folderData = {
+          name: uploadForm.folderName.trim(),
+          description: `Personal documents for ${employee.firstName} ${employee.lastName}`,
+          permissions: {
+            viewEmployeeIds: [employee._id],
+            editEmployeeIds: [employee._id],
+            deleteEmployeeIds: isAdmin ? [employee._id] : []
+          },
+          ownerId: employee._id
+        };
+
+        const folderResponse = await axios.post(
+          buildApiUrl('/documentManagement/folders'),
+          folderData,
+          {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            withCredentials: true
+          }
+        );
+
+        folderId = folderResponse.data._id;
+      }
+
+      if (!folderId) {
+        alert('Please select a folder or create a new one');
+        return;
+      }
+
+      // Step 2: Upload document to folder
       const formData = new FormData();
       formData.append('file', uploadForm.file);
       formData.append('category', uploadForm.category);
+      formData.append('folderId', folderId);
+      formData.append('ownerId', employee._id);
       if (uploadForm.description) {
         formData.append('description', uploadForm.description);
       }
 
-      const token = localStorage.getItem('auth_token');
-      const response = await axios.post(
-        buildApiUrl(`/documentManagement/employees/${employee._id}/upload`),
+      await axios.post(
+        buildApiUrl('/documentManagement/documents'),
         formData,
         {
           headers: { 
@@ -1254,20 +1300,18 @@ const DocumentsTab = ({ employee }) => {
         }
       );
 
-      alert('Document uploaded successfully');
+      alert('Document uploaded successfully!');
       setShowUploadModal(false);
-      setUploadForm({ file: null, category: 'other', description: '' });
+      setUploadForm({ 
+        file: null, 
+        category: 'other', 
+        description: '',
+        folderName: '',
+        createNewFolder: false 
+      });
       
-      // Refresh employee data without page reload
-      await fetchEmployeeData();
-      
-      // If user is in a folder, refresh that folder's documents
-      if (selectedFolder) {
-        const updatedFolder = folders.find(f => (f.id || f._id) === (selectedFolder.id || selectedFolder._id));
-        if (updatedFolder) {
-          setDocuments(updatedFolder?.documents || updatedFolder?.files || []);
-        }
-      }
+      // Refresh page to show new folder/document
+      window.location.reload();
     } catch (error) {
       console.error('Upload error:', error);
       alert(error.response?.data?.message || 'Failed to upload document');
@@ -1303,21 +1347,34 @@ const DocumentsTab = ({ employee }) => {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Documents</h3>
+        </div>
+        <div className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-400 transition-colors">
+          <FolderOpen className="w-20 h-20 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">No Documents Yet</h3>
+          <p className="text-sm text-gray-500 mb-6 max-w-md mx-auto">
+            {isAdmin 
+              ? "Get started by uploading the first document for this employee. Documents are organized in folders for easy access."
+              : "Your documents will appear here once uploaded by an administrator. Documents are organized in folders for easy access."}
+          </p>
           {isAdmin && (
             <button
               type="button"
               onClick={handleUpload}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all shadow-md hover:shadow-lg"
             >
-              <Upload className="w-4 h-4" />
-              <span>Upload</span>
+              <Upload className="w-5 h-5" />
+              <span className="font-medium">Upload First Document</span>
             </button>
           )}
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-          <FolderOpen className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No documents found.</h3>
-          <p className="text-sm text-gray-500">Documents will appear here once they are uploaded.</p>
+          {!isAdmin && (
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg max-w-md mx-auto">
+              <p className="text-sm text-blue-800">
+                <strong>Need to upload a document?</strong>
+                <br />
+                Contact your HR administrator or manager for assistance.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1451,14 +1508,23 @@ const DocumentsTab = ({ employee }) => {
       {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Upload Document</h3>
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Upload className="w-5 h-5 text-blue-600" />
+                Upload Document
+              </h3>
               <button
                 type="button"
                 onClick={() => {
                   setShowUploadModal(false);
-                  setUploadForm({ file: null, category: 'other', description: '' });
+                  setUploadForm({ 
+                    file: null, 
+                    category: 'other', 
+                    description: '',
+                    folderName: '',
+                    createNewFolder: folders.length === 0 
+                  });
                 }}
                 className="text-gray-400 hover:text-gray-600"
               >
@@ -1467,37 +1533,129 @@ const DocumentsTab = ({ employee }) => {
             </div>
             
             <div className="space-y-4">
+              {/* Folder Selection/Creation */}
+              {folders.length === 0 ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <FolderOpen className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-blue-900">Create Your First Folder</p>
+                      <p className="text-xs text-blue-700 mt-1">
+                        Documents must be organized in folders. Let's create your first one!
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Folder Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={uploadForm.folderName}
+                      onChange={(e) => setUploadForm({ ...uploadForm, folderName: e.target.value })}
+                      placeholder="e.g., Certificates, Personal Documents, Contracts"
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upload To
+                  </label>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        checked={!uploadForm.createNewFolder}
+                        onChange={() => setUploadForm({ ...uploadForm, createNewFolder: false })}
+                        className="text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">Existing Folder</span>
+                    </label>
+                    <label className="flex items-center gap-2 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        checked={uploadForm.createNewFolder}
+                        onChange={() => setUploadForm({ ...uploadForm, createNewFolder: true })}
+                        className="text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">Create New Folder</span>
+                    </label>
+                  </div>
+
+                  {uploadForm.createNewFolder && (
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        New Folder Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={uploadForm.folderName}
+                        onChange={(e) => setUploadForm({ ...uploadForm, folderName: e.target.value })}
+                        placeholder="Enter folder name"
+                        className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* File Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  File *
+                  Choose File *
                 </label>
-                <input
-                  type="file"
-                  onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files[0] })}
-                  className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt"
-                />
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition-colors">
+                  <input
+                    type="file"
+                    id="file-upload"
+                    onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files[0] })}
+                    className="hidden"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt"
+                  />
+                  <label htmlFor="file-upload" className="cursor-pointer">
+                    {uploadForm.file ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <FileText className="w-5 h-5 text-green-600" />
+                        <span className="text-sm text-gray-900 font-medium">{uploadForm.file.name}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-600">
+                          <span className="text-blue-600 font-medium">Click to browse</span> or drag and drop
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          PDF, DOC, DOCX, XLS, XLSX, JPG, PNG (Max 10MB)
+                        </p>
+                      </>
+                    )}
+                  </label>
+                </div>
               </div>
 
+              {/* Category Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Category
+                  Document Category
                 </label>
                 <select
                   value={uploadForm.category}
                   onChange={(e) => setUploadForm({ ...uploadForm, category: e.target.value })}
                   className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="other">Other</option>
-                  <option value="passport">Passport</option>
-                  <option value="visa">Visa</option>
-                  <option value="contract">Contract</option>
                   <option value="certificate">Certificate</option>
+                  <option value="passport">Passport</option>
+                  <option value="visa">Visa / Work Permit</option>
+                  <option value="contract">Employment Contract</option>
                   <option value="id_proof">ID Proof</option>
-                  <option value="resume">Resume</option>
+                  <option value="resume">Resume / CV</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
 
+              {/* Description */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Description (Optional)
@@ -1512,12 +1670,18 @@ const DocumentsTab = ({ employee }) => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
               <button
                 type="button"
                 onClick={() => {
                   setShowUploadModal(false);
-                  setUploadForm({ file: null, category: 'other', description: '' });
+                  setUploadForm({ 
+                    file: null, 
+                    category: 'other', 
+                    description: '',
+                    folderName: '',
+                    createNewFolder: folders.length === 0 
+                  });
                 }}
                 className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 disabled={uploading}
@@ -1527,10 +1691,20 @@ const DocumentsTab = ({ employee }) => {
               <button
                 type="button"
                 onClick={handleUploadSubmit}
-                disabled={uploading || !uploadForm.file}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={uploading || !uploadForm.file || (uploadForm.createNewFolder && !uploadForm.folderName?.trim())}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {uploading ? 'Uploading...' : 'Upload'}
+                {uploading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>Upload Document</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

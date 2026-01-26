@@ -23,32 +23,102 @@ const isManager = (req) => MANAGER_ROLES.includes(getUserRole(req));
 const getUserModel = (req) => (req.user?.userType === 'profile' ? 'User' : 'EmployeeHub');
 
 /**
- * Resolve employee ID for authenticated user
- * This handles the mapping from auth User ID to EmployeeHub ID
+ * Enhanced employee ID resolution for authenticated user
+ * Handles the mapping from auth User ID to EmployeeHub ID with comprehensive debugging
+ * 
+ * Resolution Strategy (4 steps):
+ * 1. Check if cached employeeId exists in req.employeeId (from middleware)
+ * 2. Try auth ID as EmployeeHub._id (employee login tokens)
+ * 3. Try auth ID as User._id → EmployeeHub.userId link (profile/admin tokens)
+ * 4. Fallback to email match in EmployeeHub
  */
 const resolveEmployeeForRequest = async (req) => {
+  console.log('🔍 [reviewsController] Starting employee resolution...');
+  
+  // Step 0: Check if already cached from middleware
+  if (req.employeeId) {
+    console.log('✅ [reviewsController] Using cached employeeId:', req.employeeId);
+    const employee = await EmployeeHub.findById(req.employeeId);
+    if (employee) {
+      console.log('✅ [reviewsController] Cached employee found:', {
+        id: employee._id,
+        email: employee.email,
+        name: `${employee.firstName} ${employee.lastName}`
+      });
+      return employee;
+    }
+  }
+
+  // Extract all possible ID sources
   const authId = req.user?.userId || req.user?.id || req.user?._id || req.session?.userId;
   const authIdStr = authId ? String(authId).trim() : '';
   const isValidObjectId = mongoose.Types.ObjectId.isValid(authIdStr);
+  
+  console.log('🔍 [reviewsController] Auth context:', {
+    authId: authIdStr,
+    isValidObjectId,
+    userEmail: req.user?.email,
+    sessionUserId: req.session?.userId,
+    userRole: req.user?.role
+  });
 
   let employee = null;
 
-  // Try as EmployeeHub _id first (employee login tokens)
+  // Step 1: Try as EmployeeHub _id (employee login tokens)
   if (isValidObjectId) {
+    console.log('🔍 [reviewsController] Step 1: Trying authId as EmployeeHub._id:', authIdStr);
     employee = await EmployeeHub.findById(authIdStr);
+    if (employee) {
+      console.log('✅ [reviewsController] Found employee by _id:', {
+        id: employee._id,
+        email: employee.email,
+        name: `${employee.firstName} ${employee.lastName}`,
+        role: employee.role
+      });
+      return employee;
+    } else {
+      console.log('⚠️ [reviewsController] No employee found with _id:', authIdStr);
+    }
   }
 
-  // Try as User _id link (profile/admin tokens)
+  // Step 2: Try as User._id → EmployeeHub.userId link (profile/admin tokens)
   if (!employee && isValidObjectId) {
+    console.log('🔍 [reviewsController] Step 2: Trying authId as User._id → EmployeeHub.userId:', authIdStr);
     employee = await EmployeeHub.findOne({ userId: authIdStr });
+    if (employee) {
+      console.log('✅ [reviewsController] Found employee by userId link:', {
+        id: employee._id,
+        userId: employee.userId,
+        email: employee.email,
+        name: `${employee.firstName} ${employee.lastName}`,
+        role: employee.role
+      });
+      return employee;
+    } else {
+      console.log('⚠️ [reviewsController] No employee found with userId:', authIdStr);
+    }
   }
 
-  // Fallback: email match
+  // Step 3: Fallback to email match
   if (!employee && req.user?.email) {
-    employee = await EmployeeHub.findOne({ email: String(req.user.email).toLowerCase() });
+    const email = String(req.user.email).toLowerCase().trim();
+    console.log('🔍 [reviewsController] Step 3: Trying email match:', email);
+    employee = await EmployeeHub.findOne({ email });
+    if (employee) {
+      console.log('✅ [reviewsController] Found employee by email:', {
+        id: employee._id,
+        email: employee.email,
+        name: `${employee.firstName} ${employee.lastName}`,
+        role: employee.role
+      });
+      return employee;
+    } else {
+      console.log('⚠️ [reviewsController] No employee found with email:', email);
+    }
   }
 
-  return employee;
+  console.error('❌ [reviewsController] Employee resolution failed - all methods exhausted');
+  return null;
 };
 
 const validateReviewType = (reviewType) => ['ANNUAL', 'PROBATION', 'AD_HOC'].includes(reviewType);

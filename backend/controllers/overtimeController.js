@@ -6,9 +6,22 @@ const ADMIN_ROLES = ['admin', 'super-admin', 'hr'];
 
 // Helper to resolve employee ID from request
 const resolveEmployeeIdForRequest = async (req) => {
-  if (!req.user) return null;
+  if (!req.user) {
+    console.error('❌ No req.user found in request');
+    return null;
+  }
   
+  console.log('🔍 Resolving employee ID for user:', { 
+    id: req.user.id, 
+    _id: req.user._id, 
+    userId: req.user.userId, 
+    email: req.user.email,
+    employeeId: req.user.employeeId 
+  });
+  
+  // If already cached on req.user, return it
   if (req.user.employeeId && mongoose.Types.ObjectId.isValid(String(req.user.employeeId))) {
+    console.log('✅ Using cached employeeId:', req.user.employeeId);
     return req.user.employeeId;
   }
 
@@ -16,15 +29,28 @@ const resolveEmployeeIdForRequest = async (req) => {
   const authIdStr = authId ? String(authId).trim() : '';
   let employee = null;
 
+  // Try finding by userId field in EmployeesHub
   if (authIdStr && mongoose.Types.ObjectId.isValid(authIdStr)) {
+    console.log('🔍 Searching by userId field:', authIdStr);
     employee = await EmployeeHub.findOne({ userId: authIdStr }).select('_id');
-    if (!employee) {
+    if (employee) {
+      console.log('✅ Found employee by userId field:', employee._id);
+    } else {
+      console.log('⚠️  No employee found by userId field, trying direct _id match');
       employee = await EmployeeHub.findById(authIdStr).select('_id');
+      if (employee) {
+        console.log('✅ Found employee by _id:', employee._id);
+      }
     }
   }
 
+  // Fall back to email lookup
   if (!employee && req.user.email) {
+    console.log('🔍 Searching by email:', req.user.email);
     employee = await EmployeeHub.findOne({ email: String(req.user.email).toLowerCase() }).select('_id');
+    if (employee) {
+      console.log('✅ Found employee by email:', employee._id);
+    }
   }
 
   if (employee?._id) {
@@ -32,6 +58,7 @@ const resolveEmployeeIdForRequest = async (req) => {
     return employee._id;
   }
 
+  console.error('❌ Could not resolve employee ID for user:', req.user.email || req.user.id);
   return null;
 };
 
@@ -50,7 +77,15 @@ const createOvertimeEntry = async (req, res) => {
     // Resolve employee ID
     const employeeId = await resolveEmployeeIdForRequest(req);
     if (!employeeId) {
-      return res.status(403).json({ message: 'Employee ID could not be resolved' });
+      console.error('❌ Failed to resolve employee ID for overtime submission');
+      console.error('User data:', req.user);
+      return res.status(403).json({ 
+        message: 'Could not find your employee profile. Please contact HR support.',
+        debug: {
+          userId: req.user?.id || req.user?._id,
+          email: req.user?.email
+        }
+      });
     }
 
     // Validate hours

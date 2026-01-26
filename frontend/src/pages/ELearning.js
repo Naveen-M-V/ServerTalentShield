@@ -204,19 +204,34 @@ await axios.post(
         const url = buildDirectUrl(viewerMaterial.fileUrl);
         const token = localStorage.getItem('auth_token');
 
+        // Fetch PDF as blob with authentication
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
         const task = pdfjsLib.getDocument({
-          url,
-          withCredentials: true,
-          httpHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
+          url: blobUrl,
           disableWorker: true
         });
 
         const doc = await task.promise;
         setPdfDoc(doc);
         setNumPages(doc.numPages || 0);
+        
+        // Clean up blob URL when component unmounts
+        return () => URL.revokeObjectURL(blobUrl);
       } catch (error) {
         console.error('Failed to load PDF:', error);
-        setPdfError('Failed to load PDF');
+        setPdfError(`Failed to load PDF: ${error.message}`);
       } finally {
         setPdfLoading(false);
       }
@@ -507,12 +522,22 @@ await axios.post(
                   <canvas ref={canvasRef} className="max-w-full shadow-lg" />
                 </div>
               ) : (viewerMaterial?.mimeType?.includes('presentation') || viewerMaterial?.mimeType?.includes('powerpoint')) ? (
-                <div className="h-full w-full">
-                  <iframe
-                    src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(buildDirectUrl(viewerMaterial.fileUrl))}`}
-                    className="w-full h-full border-0 rounded"
-                    title={viewerMaterial.name}
-                  />
+                <div className="h-full w-full flex flex-col items-center justify-center gap-4">
+                  <div className="text-center">
+                    <FileText className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                    <p className="text-gray-700 text-lg font-medium mb-2">PowerPoint Presentation</p>
+                    <p className="text-gray-500 text-sm mb-4">
+                      Click the download button below to view this presentation
+                    </p>
+                    <button
+                      onClick={() => handleDownload(viewerMaterial)}
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      disabled={downloadingId === viewerMaterial?._id}
+                    >
+                      <Download className="w-5 h-5" />
+                      {downloadingId === viewerMaterial?._id ? 'Downloading...' : 'Download Presentation'}
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </div>
