@@ -22,8 +22,10 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
 
   const fetchSicknessRecords = async () => {
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/leave/records`, {
-        params: { userId: employee._id, type: 'sickness' }
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/sickness/employee/${employee._id}`, {
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+        withCredentials: true
       });
       setSicknessRecords(response.data.data || []);
     } catch (err) {
@@ -36,19 +38,16 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
     setLoading(true);
     
     try {
-      const days = formData.startDate && formData.endDate 
-        ? dayjs(formData.endDate).diff(dayjs(formData.startDate), 'day') + 1
-        : 1;
-
-      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/leave/records`, {
-        userId: employee._id,
-        type: 'sickness',
+      const token = localStorage.getItem('auth_token');
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/sickness/create`, {
+        employeeId: employee._id,
         startDate: formData.startDate,
         endDate: formData.endDate || formData.startDate,
-        days: days,
-        reason: formData.reason,
-        notes: formData.notes,
-        status: 'approved'
+        sicknessType: formData.reason,
+        notes: formData.notes
+      }, {
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+        withCredentials: true
       });
 
       setFormData({ startDate: null, endDate: null, reason: '', notes: '' });
@@ -67,7 +66,11 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
     if (!window.confirm('Are you sure you want to delete this sickness record?')) return;
     
     try {
-      await axios.delete(`${process.env.REACT_APP_API_BASE_URL}/leave/records/${recordId}`);
+      const token = localStorage.getItem('auth_token');
+      await axios.delete(`${process.env.REACT_APP_API_BASE_URL}/sickness/${recordId}`, {
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+        withCredentials: true
+      });
       fetchSicknessRecords();
       if (onSuccess) onSuccess();
     } catch (err) {
@@ -183,9 +186,16 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-red-600 font-semibold">{record.reason || 'Sickness'}</span>
+                        <span className="text-red-600 font-semibold">{record.sicknessType || 'Sickness'}</span>
                         <span className="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-medium rounded-full">
-                          {record.days} day{record.days !== 1 ? 's' : ''}
+                          {record.numberOfDays} day{record.numberOfDays !== 1 ? 's' : ''}
+                        </span>
+                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                          record.approvalStatus === 'approved' ? 'bg-green-100 text-green-800' :
+                          record.approvalStatus === 'rejected' ? 'bg-red-100 text-red-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {record.approvalStatus}
                         </span>
                       </div>
                       <p className="text-sm text-gray-600">
@@ -195,6 +205,11 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
                       </p>
                       {record.notes && (
                         <p className="text-sm text-gray-500 mt-2 italic">"{record.notes}"</p>
+                      )}
+                      {record.requiresNote && (
+                        <p className="text-sm text-orange-600 mt-1">
+                          Medical note {record.medicalNoteSubmitted ? '✓ submitted' : '⚠ required'}
+                        </p>
                       )}
                     </div>
                     <button
@@ -243,8 +258,10 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
 
   const fetchLatenessRecords = async () => {
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/leave/records`, {
-        params: { userId: employee._id, type: 'lateness' }
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/lateness/employee/${employee._id}`, {
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+        withCredentials: true
       });
       setLatenessRecords(response.data.data || []);
     } catch (err) {
@@ -257,15 +274,26 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
     setLoading(true);
     
     try {
-      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/leave/records`, {
-        userId: employee._id,
-        type: 'lateness',
-        startDate: formData.date,
-        endDate: formData.date,
-        days: 0, // Lateness doesn't count as days off
-        reason: formData.reason,
-        notes: `${formData.minutes} minutes late. ${formData.notes}`,
-        status: 'approved'
+      const token = localStorage.getItem('auth_token');
+      
+      // Create scheduledStart and actualStart times
+      const dateObj = new Date(formData.date);
+      const scheduledStart = new Date(dateObj);
+      scheduledStart.setHours(9, 0, 0, 0); // Default 9:00 AM
+      
+      const actualStart = new Date(dateObj);
+      actualStart.setHours(9, parseInt(formData.minutes), 0, 0); // Add lateness minutes
+      
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/lateness/create`, {
+        employeeId: employee._id,
+        date: formData.date,
+        scheduledStart: scheduledStart.toISOString(),
+        actualStart: actualStart.toISOString(),
+        minutesLate: parseInt(formData.minutes),
+        reason: formData.notes || formData.reason
+      }, {
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+        withCredentials: true
       });
 
       setFormData({ date: null, minutes: '', reason: '', notes: '' });
@@ -284,7 +312,11 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
     if (!window.confirm('Are you sure you want to delete this lateness record?')) return;
     
     try {
-      await axios.delete(`${process.env.REACT_APP_API_BASE_URL}/leave/records/${recordId}`);
+      const token = localStorage.getItem('auth_token');
+      await axios.delete(`${process.env.REACT_APP_API_BASE_URL}/lateness/${recordId}`, {
+        headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
+        withCredentials: true
+      });
       fetchLatenessRecords();
       if (onSuccess) onSuccess();
     } catch (err) {
@@ -402,9 +434,6 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
               </div>
             ) : (
               latenessRecords.map((record) => {
-                const minutesMatch = record.notes?.match(/(\d+) minutes/);
-                const minutes = minutesMatch ? minutesMatch[1] : 'Unknown';
-                
                 return (
                   <div key={record._id} className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                     <div className="flex items-start justify-between">
@@ -412,14 +441,22 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-yellow-600 font-semibold">{record.reason || 'Late'}</span>
                           <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">
-                            {minutes} min
+                            {record.minutesLate} min
+                          </span>
+                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                            record.excused ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {record.excused ? 'Excused' : 'Unexcused'}
                           </span>
                         </div>
                         <p className="text-sm text-gray-600">
-                          {dayjs(record.startDate).format('MMM D, YYYY')}
+                          {dayjs(record.date).format('MMM D, YYYY')} - {dayjs(record.scheduledStart).format('HH:mm')} → {dayjs(record.actualStart).format('HH:mm')}
                         </p>
-                        {record.notes && (
-                          <p className="text-sm text-gray-500 mt-2 italic">"{record.notes}"</p>
+                        {record.reason && (
+                          <p className="text-sm text-gray-500 mt-2 italic">"{record.reason}"</p>
+                        )}
+                        {record.excused && record.excuseReason && (
+                          <p className="text-sm text-green-600 mt-1">Excuse: {record.excuseReason}</p>
                         )}
                       </div>
                       <button

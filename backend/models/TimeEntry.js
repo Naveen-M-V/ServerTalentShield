@@ -97,6 +97,28 @@ const timeEntrySchema = new mongoose.Schema({
     default: 0
   },
   
+  // Actor/Subject Tracking (for admin actions on behalf of employees)
+  performedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null
+  },
+  performedByRole: {
+    type: String,
+    enum: ['admin', 'super-admin', 'employee', 'hr'],
+    required: false,
+    default: null
+  },
+  isAdminAction: {
+    type: Boolean,
+    default: false
+  },
+  actionNotes: {
+    type: String,
+    default: null
+  },
+  
   // Location and Work Type
   location: {
     type: String,

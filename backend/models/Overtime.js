@@ -46,6 +46,24 @@ const overtimeSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  // Actor/Subject Tracking (for admin approvals)
+  approvedByUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null
+  },
+  approverRole: {
+    type: String,
+    enum: ['admin', 'super-admin', 'hr', 'manager'],
+    required: false,
+    default: null
+  },
+  approverComments: {
+    type: String,
+    maxlength: 500,
+    required: false
+  },
   notes: {
     type: String,
     default: ''

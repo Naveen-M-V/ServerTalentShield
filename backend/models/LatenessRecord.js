@@ -60,6 +60,23 @@ const latenessRecordSchema = new mongoose.Schema({
     type: String,
     maxlength: [500, 'Excuse reason cannot exceed 500 characters']
   },
+  // Actor/Subject Tracking (for admin-created lateness records)
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null
+  },
+  createdByRole: {
+    type: String,
+    enum: ['admin', 'super-admin', 'hr', 'manager', 'system'],
+    required: false,
+    default: 'system'
+  },
+  isAdminCreated: {
+    type: Boolean,
+    default: false
+  },
   notes: {
     type: String,
     maxlength: [1000, 'Notes cannot exceed 1000 characters']

@@ -126,6 +126,12 @@ router.post('/in', asyncHandler(async (req, res) => {
   // Create new time entry using legacy fields
   // Store as UTC Date object - MongoDB will handle timezone conversion
   const clockInTime = new Date();
+  
+  // Detect if this is an admin action (admin clocking in an employee)
+  const actorUserId = req.user?._id || req.user?.userId || req.user?.id;
+  const actorRole = req.user?.role || req.user?.userType;
+  const isAdminAction = actorRole && ['admin', 'super-admin', 'hr'].includes(actorRole);
+  
   const entry = new TimeEntry({
     employee: employeeId,
     date: today,
@@ -133,7 +139,12 @@ router.post('/in', asyncHandler(async (req, res) => {
     clockIn: clockInTime,
     location: location || 'Office',
     workType: workType || 'Regular',
-    createdBy: req.user?._id || req.user?.userId || req.user?.id
+    createdBy: actorUserId,
+    // Actor/Subject Tracking
+    performedBy: isAdminAction ? actorUserId : null,
+    performedByRole: isAdminAction ? actorRole : null,
+    isAdminAction: isAdminAction,
+    actionNotes: isAdminAction ? `Admin clock-in by ${req.user?.firstName || 'Admin'} ${req.user?.lastName || ''}`.trim() : null
   });
 
   // Add GPS location if provided
@@ -264,6 +275,21 @@ router.post('/out', asyncHandler(async (req, res) => {
   const now = new Date();
   entry.clockOut = now;
   entry.status = 'clocked_out';
+
+  // Detect if this is an admin action (admin clocking out an employee)
+  const actorUserId = req.user?._id || req.user?.userId || req.user?.id;
+  const actorRole = req.user?.role || req.user?.userType;
+  const isAdminAction = actorRole && ['admin', 'super-admin', 'hr'].includes(actorRole);
+  
+  // Update actor tracking if this is an admin action
+  if (isAdminAction) {
+    entry.performedBy = actorUserId;
+    entry.performedByRole = actorRole;
+    entry.isAdminAction = true;
+    const actionNote = entry.actionNotes || '';
+    entry.actionNotes = actionNote + (actionNote ? '; ' : '') + 
+      `Admin clock-out by ${req.user?.firstName || 'Admin'} ${req.user?.lastName || ''}`.trim();
+  }
 
   // Clear break status if on break
   if (entry.onBreakStart) {

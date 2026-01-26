@@ -736,8 +736,9 @@ const OvertimeTab = ({ employee }) => {
       setSubmitting(true);
       const token = localStorage.getItem('auth_token');
       const response = await axios.post(
-        buildApiUrl('/overtime/entry'),
+        buildApiUrl('/overtime/create'),
         {
+          employeeId: employee._id,
           date: newEntry.date,
           scheduledHours: scheduled,
           workedHours: worked,

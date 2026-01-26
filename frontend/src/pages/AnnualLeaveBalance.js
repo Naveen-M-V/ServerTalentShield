@@ -22,15 +22,16 @@ const AnnualLeaveBalance = () => {
     }
   }, [user]);
 
-  // Fetch real leave balance data from API
+  // Fetch real leave balance data from API - ENHANCED TO SHOW ALL EMPLOYEES
   useEffect(() => {
     const fetchLeaveBalances = async () => {
       try {
         setLoading(true);
         setError(null);
         
-        console.log('Fetching leave balances...');
-        const response = await getLeaveBalances({ current: true });
+        console.log('Fetching leave balances (including employees without balances)...');
+        // Use includeAll=true to get ALL employees, not just those with balance records
+        const response = await getLeaveBalances({ current: true, includeAll: true });
         console.log('API Response:', response);
         
         if (!response || !response.data) {
@@ -56,14 +57,17 @@ const AnnualLeaveBalance = () => {
             takenLeave: balance.usedDays || 0,
             pendingLeave: 0, // Will be calculated from pending leave requests
             remainingLeave: balance.remainingDays || 0,
-            status: 'active',
+            status: balance.hasBalance ? 'active' : 'needs-setup',
             userId: balance.user?._id,
             yearStart: balance.leaveYearStart,
-            yearEnd: balance.leaveYearEnd
+            yearEnd: balance.leaveYearEnd,
+            needsInitialization: balance.needsInitialization || false
           };
         });
         
-        console.log('Transformed data:', transformedData);
+        console.log(`Transformed data: ${transformedData.length} employees total`);
+        console.log(`- With balance: ${transformedData.filter(e => !e.needsInitialization).length}`);
+        console.log(`- Needs setup: ${transformedData.filter(e => e.needsInitialization).length}`);
         setEmployees(transformedData);
       } catch (err) {
         console.error('Failed to fetch leave balances:', err);
@@ -91,10 +95,25 @@ const AnnualLeaveBalance = () => {
     switch (status) {
       case 'active':
         return 'text-green-600 bg-green-50';
+      case 'needs-setup':
+        return 'text-orange-600 bg-orange-50';
       case 'inactive':
         return 'text-red-600 bg-red-50';
       default:
         return 'text-gray-600 bg-gray-50';
+    }
+  };
+  
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'active':
+        return 'Active';
+      case 'needs-setup':
+        return 'Needs Setup';
+      case 'inactive':
+        return 'Inactive';
+      default:
+        return 'Unknown';
     }
   };
 
@@ -333,8 +352,13 @@ const AnnualLeaveBalance = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(employee.status)}`}>
-                          {employee.status}
+                          {getStatusLabel(employee.status)}
                         </span>
+                        {employee.needsInitialization && (
+                          <span className="ml-2 text-xs text-orange-600" title="This employee needs leave balance initialization">
+                            ⚠️
+                          </span>
+                        )}
                       </td>
                       {isAdminUser && (
                         <td className="px-6 py-4 whitespace-nowrap">

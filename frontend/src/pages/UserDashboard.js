@@ -74,6 +74,16 @@ const UserDashboard = () => {
   const [pendingAction, setPendingAction] = useState(null);
   const [expandedCard, setExpandedCard] = useState(null);
 
+  // Overtime state
+  const [overtimeRecords, setOvertimeRecords] = useState([]);
+  const [showOvertimeModal, setShowOvertimeModal] = useState(false);
+  const [overtimeForm, setOvertimeForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    scheduledHours: '',
+    workedHours: '',
+    notes: ''
+  });
+
   // GPS location state
   const [gpsCoordinates, setGpsCoordinates] = useState(null);
   const [locationAccuracy, setLocationAccuracy] = useState(null);
@@ -202,6 +212,74 @@ const UserDashboard = () => {
     }
   }, [API_BASE_URL, user.email, isEmployeeUser]);
 
+  // Fetch overtime records for employee
+  const fetchOvertimeRecords = useCallback(async () => {
+    if (!isEmployeeUser || !userProfile?._id) return;
+    
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(buildApiUrl(`/overtime/employee/${userProfile._id}`), {
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setOvertimeRecords(data.overtimeRecords || []);
+      } else {
+        console.error('Failed to fetch overtime records:', response.status);
+        setOvertimeRecords([]);
+      }
+    } catch (error) {
+      console.error('Error fetching overtime records:', error);
+      setOvertimeRecords([]);
+    }
+  }, [isEmployeeUser, userProfile]);
+
+  // Handle overtime submission
+  const handleOvertimeSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!overtimeForm.scheduledHours || !overtimeForm.workedHours) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(buildApiUrl('/overtime/create'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(overtimeForm)
+      });
+
+      if (response.ok) {
+        toast.success('Overtime logged successfully');
+        setShowOvertimeModal(false);
+        setOvertimeForm({
+          date: new Date().toISOString().split('T')[0],
+          scheduledHours: '',
+          workedHours: '',
+          notes: ''
+        });
+        fetchOvertimeRecords();
+      } else {
+        const error = await response.json();
+        toast.error(error.message || 'Failed to log overtime');
+      }
+    } catch (error) {
+      console.error('Error logging overtime:', error);
+      toast.error('Failed to log overtime');
+    }
+  };
+
   // Debug: Log clockStatus changes
   useEffect(() => {
     console.log('🎯 clockStatus state changed:', JSON.stringify(clockStatus, null, 2));
@@ -238,6 +316,13 @@ const UserDashboard = () => {
       return () => clearInterval(interval);
     }
   }, [user, fetchUserData]);
+
+  // Fetch overtime records when userProfile is loaded
+  useEffect(() => {
+    if (isEmployeeUser && userProfile?._id) {
+      fetchOvertimeRecords();
+    }
+  }, [isEmployeeUser, userProfile, fetchOvertimeRecords]);
 
   // Capture current GPS location for map display
   const captureCurrentLocation = () => {
@@ -1154,6 +1239,73 @@ const UserDashboard = () => {
                   </div>
                 )}
               </div>
+
+              {/* Overtime Card */}
+              <div>
+                <button
+                  onClick={() => setExpandedCard(expandedCard === 'overtime' ? null : 'overtime')}
+                  className="w-full bg-white overflow-hidden shadow-md rounded-lg hover:shadow-lg transition-all hover:scale-105 cursor-pointer"
+                >
+                  <div className="p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center flex-1">
+                        <div className="flex-shrink-0">
+                          <ClockIcon className="h-6 w-6 text-purple-500" />
+                        </div>
+                        <div className="ml-5 w-0 flex-1">
+                          <dl>
+                            <dt className="text-sm font-medium text-gray-500 truncate">Overtime Hours</dt>
+                            <dd className="text-lg font-semibold text-gray-900">
+                              {overtimeRecords.filter(o => o.approvalStatus === 'approved').reduce((sum, o) => sum + (o.overtimeHours || 0), 0).toFixed(1)}
+                            </dd>
+                          </dl>
+                        </div>
+                      </div>
+                      <svg className={`h-5 w-5 text-gray-400 transition-transform ${expandedCard === 'overtime' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </button>
+                {expandedCard === 'overtime' && (
+                  <div className="mt-2 bg-white shadow rounded-lg p-4 animate-fadeIn">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-sm font-semibold text-gray-700">My Overtime</h4>
+                      <button
+                        onClick={() => setShowOvertimeModal(true)}
+                        className="px-3 py-1 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700"
+                      >
+                        Log Overtime
+                      </button>
+                    </div>
+                    {overtimeRecords.length === 0 ? (
+                      <p className="text-sm text-gray-500">No overtime records</p>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {overtimeRecords.slice(0, 5).map((record, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded hover:bg-gray-100">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">
+                                {new Date(record.date).toLocaleDateString('en-GB')} - {record.overtimeHours?.toFixed(1)}h
+                              </p>
+                              <p className="text-xs text-gray-500">{record.notes || 'No notes'}</p>
+                            </div>
+                            <div className="text-right">
+                              <span className={`text-xs font-semibold px-2 py-1 rounded ${
+                                record.approvalStatus === 'approved' ? 'bg-green-100 text-green-700' :
+                                record.approvalStatus === 'rejected' ? 'bg-red-100 text-red-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {record.approvalStatus}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Leave Request Section Removed */}
@@ -1462,6 +1614,86 @@ const UserDashboard = () => {
         cancelText="Cancel"
         variant="destructive"
       />
+
+      {/* Overtime Modal */}
+      {showOvertimeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Log Overtime</h3>
+              <button
+                onClick={() => setShowOvertimeModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleOvertimeSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={overtimeForm.date}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Scheduled Hours</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={overtimeForm.scheduledHours}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, scheduledHours: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="e.g., 8"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Worked Hours</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={overtimeForm.workedHours}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, workedHours: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="e.g., 10"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                <textarea
+                  value={overtimeForm.notes}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  rows="3"
+                  placeholder="Reason for overtime..."
+                />
+              </div>
+              <div className="flex space-x-3 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-purple-600 text-white font-medium rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  Submit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowOvertimeModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1536,10 +1768,11 @@ const MyDocumentsWidget = ({ userId }) => {
       const formData = new FormData();
       formData.append('file', uploadFile);
       formData.append('category', 'other');
+      formData.append('ownerId', userId); // Set employee as document owner
 
       const token = localStorage.getItem('auth_token');
       const response = await fetch(
-        buildApiUrl(`/documentManagement/employees/${userId}/upload`),
+        buildApiUrl('/documents/upload'),
         {
           method: 'POST',
           credentials: 'include',

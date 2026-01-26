@@ -17,6 +17,10 @@ const documentManagementSchema = new mongoose.Schema({
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   uploadedByRole: { type: String, enum: ['admin', 'employee'], required: true },
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmployeeHub', default: null },
+  
+  // Actor/Subject Tracking
+  performedByAdmin: { type: Boolean, default: false },
+  targetEmployeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmployeeHub', default: null },
 
   // Folder Organization
   folderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Folder', default: null },

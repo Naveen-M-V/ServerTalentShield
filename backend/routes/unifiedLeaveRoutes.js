@@ -197,11 +197,90 @@ const AnnualLeaveBalance = require('../models/AnnualLeaveBalance');
 const EmployeesHub = require('../models/EmployeesHub');
 const LeaveRecord = require('../models/LeaveRecord');
 
-// Get leave balances with optional filters
+// Get leave balances with optional filters - ENHANCED TO SHOW ALL EMPLOYEES
 router.get('/balances', async (req, res) => {
   try {
-    const { userId, yearStart, current } = req.query;
+    const { userId, yearStart, current, includeAll } = req.query;
     
+    // If includeAll=true, return ALL employees with their balance data (or zero if no balance)
+    if (includeAll === 'true') {
+      const now = new Date();
+      
+      // Get all active employees
+      const allEmployees = await EmployeesHub.find({ 
+        isActive: { $ne: false },
+        deleted: { $ne: true }
+      }).select('firstName lastName email vtid department employeeId');
+      
+      // Get all leave balances for current year
+      const balances = await AnnualLeaveBalance.find({
+        leaveYearStart: { $lte: now },
+        leaveYearEnd: { $gte: now }
+      }).lean();
+      
+      // Create a map of employee ID to balance
+      const balanceMap = {};
+      balances.forEach(balance => {
+        const userId = balance.user.toString();
+        balanceMap[userId] = balance;
+      });
+      
+      // Merge employees with their balances
+      const result = allEmployees.map(emp => {
+        const balance = balanceMap[emp._id.toString()];
+        
+        if (balance) {
+          // Employee has a balance record
+          return {
+            _id: balance._id,
+            user: {
+              _id: emp._id,
+              firstName: emp.firstName,
+              lastName: emp.lastName,
+              email: emp.email,
+              vtid: emp.vtid,
+              department: emp.department
+            },
+            entitlementDays: balance.entitlementDays || 0,
+            carryOverDays: balance.carryOverDays || 0,
+            usedDays: balance.usedDays || 0,
+            remainingDays: balance.remainingDays || 0,
+            leaveYearStart: balance.leaveYearStart,
+            leaveYearEnd: balance.leaveYearEnd,
+            hasBalance: true
+          };
+        } else {
+          // Employee has NO balance record - return placeholder
+          return {
+            _id: null,
+            user: {
+              _id: emp._id,
+              firstName: emp.firstName,
+              lastName: emp.lastName,
+              email: emp.email,
+              vtid: emp.vtid,
+              department: emp.department
+            },
+            entitlementDays: 0,
+            carryOverDays: 0,
+            usedDays: 0,
+            remainingDays: 0,
+            leaveYearStart: null,
+            leaveYearEnd: null,
+            hasBalance: false,
+            needsInitialization: true
+          };
+        }
+      });
+      
+      return res.json({
+        success: true,
+        data: result,
+        message: `Showing ${result.length} employees (${result.filter(r => r.hasBalance).length} with balance, ${result.filter(r => !r.hasBalance).length} without balance)`
+      });
+    }
+    
+    // Standard query - only return employees with balance records
     let query = {};
     
     if (userId) {

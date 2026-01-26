@@ -334,9 +334,18 @@ exports.approveLeaveRequest = async (req, res) => {
     // Update leave request
     leaveRequest.status = 'Approved';
     leaveRequest.approverId = approverId;
-    leaveRequest.approvedBy = approverId; // Track who approved
+    leaveRequest.approvedBy = approverId; // Track who approved (EmployeeHub ID)
     leaveRequest.adminComment = adminComment || '';
     leaveRequest.approvedAt = new Date();
+    
+    // Track admin User ID if admin approval (actor/subject tracking)
+    const actorRole = req.user?.role || req.user?.userType;
+    if (actorRole && ['admin', 'super-admin', 'hr'].includes(actorRole)) {
+      leaveRequest.approvedByUserId = adminUserId; // User._id (actor)
+      leaveRequest.approverRole = actorRole;
+      leaveRequest.approverComments = adminComment || 'Approved by admin';
+    }
+    
     await leaveRequest.save();
 
     // Create LeaveRecord for reporting
@@ -453,9 +462,18 @@ exports.rejectLeaveRequest = async (req, res) => {
 
     leaveRequest.status = 'Rejected';
     leaveRequest.approverId = approverId;
-    leaveRequest.rejectedBy = approverId; // Track who rejected
+    leaveRequest.rejectedBy = approverId; // Track who rejected (EmployeeHub ID)
     leaveRequest.rejectionReason = rejectionReason;
     leaveRequest.rejectedAt = new Date();
+    
+    // Track admin User ID if admin rejection (actor/subject tracking)
+    const actorRole = req.user?.role || req.user?.userType;
+    if (actorRole && ['admin', 'super-admin', 'hr'].includes(actorRole)) {
+      leaveRequest.approvedByUserId = adminUserId; // Reuse field for rejector User._id (actor)
+      leaveRequest.approverRole = actorRole;
+      leaveRequest.approverComments = rejectionReason || 'Rejected by admin';
+    }
+    
     await leaveRequest.save();
 
     // Notify employee

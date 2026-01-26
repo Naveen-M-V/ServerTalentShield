@@ -741,11 +741,15 @@ router.post('/folders/:folderId/documents',
         isArchived: false,
         downloadCount: 0,
         lastAccessedAt: null,
+        // Actor/Subject Tracking
+        performedByAdmin: userRole === 'admin' && ownerId !== null && ownerId !== uploadedBy,
+        targetEmployeeId: ownerId,
         auditLog: [{
           action: 'uploaded',
           performedBy: uploadedBy,
           timestamp: new Date(),
-          details: `Document uploaded by ${req.user.firstName || ''} ${req.user.lastName || ''}`
+          details: `Document uploaded by ${req.user.firstName || ''} ${req.user.lastName || ''}` + 
+                   (userRole === 'admin' && ownerId ? ` for employee ${ownerId}` : '')
         }]
       });
 
@@ -756,11 +760,23 @@ router.post('/folders/:folderId/documents',
 
       await document.save();
 
-      await document.populate([
-        { path: 'uploadedBy', select: 'firstName lastName email' },
-        { path: 'ownerId', select: 'firstName lastName employeeId' },
-        { path: 'folderId', select: 'name' }
-      ]);
+      // Populate references - handle cases where ownerId might be null or invalid
+      try {
+        const populateOptions = [
+          { path: 'uploadedBy', select: 'firstName lastName email' },
+          { path: 'folderId', select: 'name' }
+        ];
+        
+        // Only populate ownerId if it exists
+        if (document.ownerId) {
+          populateOptions.push({ path: 'ownerId', select: 'firstName lastName employeeId' });
+        }
+        
+        await document.populate(populateOptions);
+      } catch (populateError) {
+        console.warn('Document populate warning:', populateError.message);
+        // Continue even if populate fails - document is already saved
+      }
 
       res.status(201).json(document);
     } catch (error) {

@@ -63,6 +63,24 @@ const leaveRequestSchema = new mongoose.Schema(
     rejectedAt: {
       type: Date
     },
+    // Actor/Subject Tracking (for admin actions)
+    approvedByUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: false,
+      default: null
+    },
+    approverRole: {
+      type: String,
+      enum: ['admin', 'super-admin', 'hr', 'manager'],
+      required: false,
+      default: null
+    },
+    approverComments: {
+      type: String,
+      maxlength: 500,
+      required: false
+    },
     createdAt: {
       type: Date,
       default: Date.now

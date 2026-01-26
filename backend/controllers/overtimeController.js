@@ -65,7 +65,7 @@ const resolveEmployeeIdForRequest = async (req) => {
 // Create overtime entry
 const createOvertimeEntry = async (req, res) => {
   try {
-    const { date, scheduledHours, workedHours, notes } = req.body;
+    const { employeeId: providedEmployeeId, date, scheduledHours, workedHours, notes } = req.body;
 
     // Validate required fields
     if (!date || scheduledHours === undefined || workedHours === undefined) {
@@ -74,18 +74,30 @@ const createOvertimeEntry = async (req, res) => {
       });
     }
 
-    // Resolve employee ID
-    const employeeId = await resolveEmployeeIdForRequest(req);
-    if (!employeeId) {
-      console.error('❌ Failed to resolve employee ID for overtime submission');
-      console.error('User data:', req.user);
-      return res.status(403).json({ 
-        message: 'Could not find your employee profile. Please contact HR support.',
-        debug: {
-          userId: req.user?.id || req.user?._id,
-          email: req.user?.email
-        }
-      });
+    // Determine employee ID (admin can provide it, employee uses their own)
+    const isAdmin = ADMIN_ROLES.includes(req.user?.role);
+    let employeeId;
+
+    if (isAdmin && providedEmployeeId) {
+      // Admin creating for specific employee
+      if (!mongoose.Types.ObjectId.isValid(providedEmployeeId)) {
+        return res.status(400).json({ message: 'Invalid employee ID provided' });
+      }
+      employeeId = providedEmployeeId;
+    } else {
+      // Employee creating for themselves OR admin without employeeId
+      employeeId = await resolveEmployeeIdForRequest(req);
+      if (!employeeId) {
+        console.error('❌ Failed to resolve employee ID for overtime submission');
+        console.error('User data:', req.user);
+        return res.status(403).json({ 
+          message: 'Could not find your employee profile. Please contact HR support.',
+          debug: {
+            userId: req.user?.id || req.user?._id,
+            email: req.user?.email
+          }
+        });
+      }
     }
 
     // Validate hours
@@ -279,6 +291,15 @@ const approveOvertime = async (req, res) => {
     overtime.approvedAt = new Date();
     overtime.rejectionReason = null;
 
+    // Track admin User ID (actor/subject tracking)
+    const actorUserId = req.user?._id || req.user?.userId || req.user?.id;
+    const actorRole = req.user?.role || req.user?.userType;
+    if (actorRole && ADMIN_ROLES.includes(actorRole)) {
+      overtime.approvedByUserId = actorUserId;
+      overtime.approverRole = actorRole;
+      overtime.approverComments = 'Approved by ' + (req.user?.firstName || 'Admin');
+    }
+
     await overtime.save();
 
     // Populate for response
@@ -329,6 +350,15 @@ const rejectOvertime = async (req, res) => {
     overtime.approvedBy = adminEmployeeId;
     overtime.approvedAt = new Date();
     overtime.rejectionReason = reason || 'No reason provided';
+
+    // Track admin User ID (actor/subject tracking)
+    const actorUserId = req.user?._id || req.user?.userId || req.user?.id;
+    const actorRole = req.user?.role || req.user?.userType;
+    if (actorRole && ADMIN_ROLES.includes(actorRole)) {
+      overtime.approvedByUserId = actorUserId;
+      overtime.approverRole = actorRole;
+      overtime.approverComments = reason || 'Rejected by ' + (req.user?.firstName || 'Admin');
+    }
 
     await overtime.save();
 
