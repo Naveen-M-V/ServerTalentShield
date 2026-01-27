@@ -62,68 +62,8 @@ const Documents = ({ embedded = false }) => {
   const [activeFolder, setActiveFolder] = useState(null);
   const [renameFolderValue, setRenameFolderValue] = useState('');
   
-  // My Documents functionality
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadForm, setUploadForm] = useState({ file: null, category: 'other', description: '' });
-  const [myDocumentsFolder, setMyDocumentsFolder] = useState(null);
   const [showDocumentViewer, setShowDocumentViewer] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null);
-
-  // Auto-create "My Documents" folder on mount
-  useEffect(() => {
-    ensureMyDocumentsFolder();
-  }, [user]);
-
-  const ensureMyDocumentsFolder = async () => {
-    if (!user) return;
-    
-    try {
-      const token = localStorage.getItem('auth_token');
-      const apiUrl = process.env.REACT_APP_API_URL || 'https://hrms.talentshield.co.uk';
-      
-      // Check if My Documents already exists
-      const response = await axios.get(`${apiUrl}/api/documentManagement/folders`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      // Find any My Documents folder (regardless of isDefault flag)
-      const existingFolder = response.data.folders?.find(f => 
-        f.name === 'My Documents' || f.name.includes('My Documents')
-      );
-      
-      if (existingFolder) {
-        setMyDocumentsFolder(existingFolder);
-        return;
-      }
-      
-      // Only create if none exists
-      const folderData = {
-        name: 'My Documents',
-        description: 'Personal documents',
-        isDefault: true
-      };
-      
-      const createResponse = await axios.post(
-        `${apiUrl}/api/documentManagement/folders`,
-        folderData,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      setMyDocumentsFolder(createResponse.data);
-      fetchFolders(); // Refresh folder list
-    } catch (error) {
-      console.error('Error ensuring My Documents folder:', error);
-    }
-  };
 
   // Fetch folders from API
   useEffect(() => {

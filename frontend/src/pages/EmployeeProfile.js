@@ -35,6 +35,8 @@ import TerminationFlowModal from '../components/TerminationFlowModal';
 import { useAuth } from '../context/AuthContext';
 import { buildApiUrl, buildDirectUrl } from '../utils/apiConfig';
 import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
+import Documents from './Documents';
+import { useAlert } from '../components/AlertNotification';
 
 const EmployeeProfile = () => {
   const [showLeaveModal, setShowLeaveModal] = React.useState(false);
@@ -1171,18 +1173,230 @@ const EmergenciesTab = ({ employee }) => {
 
 // Documents Tab with Document Manager
 const DocumentsTab = ({ employee }) => {
-  // Simply use the Documents component - it will handle everything
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadForm, setUploadForm] = useState({ 
+    file: null, 
+    category: 'other', 
+    description: '',
+    targetEmployeeId: employee?._id
+  });
+  const { error: showError, success: showSuccess } = useAlert();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleUploadToEmployee = async () => {
+    if (!uploadForm.file) {
+      showError('Please select a file');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const token = localStorage.getItem('auth_token');
+      
+      // Step 1: Check if employee has "My Documents" folder
+      const foldersResponse = await axios.get(
+        buildApiUrl('/documentManagement/folders'),
+        {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+          withCredentials: true
+        }
+      );
+      
+      // Find or create "My Documents" folder for this employee
+      let myDocsFolder = foldersResponse.data.folders?.find(f => 
+        f.name === 'My Documents' && 
+        f.permissions?.viewEmployeeIds?.includes(employee._id)
+      );
+      
+      if (!myDocsFolder) {
+        // Create "My Documents" folder for this employee
+        const folderData = {
+          name: 'My Documents',
+          description: `Personal documents for ${employee.firstName} ${employee.lastName}`,
+          permissions: {
+            viewEmployeeIds: [employee._id],
+            editEmployeeIds: [employee._id],
+            deleteEmployeeIds: [employee._id]
+          },
+          isDefault: true
+        };
+
+        const folderResponse = await axios.post(
+          buildApiUrl('/documentManagement/folders'),
+          folderData,
+          {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            withCredentials: true
+          }
+        );
+        
+        myDocsFolder = folderResponse.data.folder || folderResponse.data;
+      }
+
+      // Step 2: Upload document to the folder with ownerId
+      const formData = new FormData();
+      formData.append('file', uploadForm.file);
+      formData.append('category', uploadForm.category);
+      formData.append('ownerId', employee._id); // Critical: links document to employee
+      if (uploadForm.description) {
+        formData.append('description', uploadForm.description);
+      }
+
+      await axios.post(
+        buildApiUrl(`/documentManagement/folders/${myDocsFolder._id}/documents`),
+        formData,
+        {
+          headers: { 
+            'Content-Type': 'multipart/form-data',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
+          withCredentials: true
+        }
+      );
+
+      showSuccess('Document uploaded successfully!');
+      setShowUploadModal(false);
+      setUploadForm({ 
+        file: null, 
+        category: 'other', 
+        description: '',
+        targetEmployeeId: employee?._id
+      });
+      
+      // Refresh the Documents component
+      setRefreshKey(prev => prev + 1);
+    } catch (error) {
+      console.error('Upload error:', error);
+      showError(error.response?.data?.message || 'Failed to upload document');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Documents</h3>
-      <Documents embedded />
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-900">Documents</h3>
+        <button
+          type="button"
+          onClick={() => setShowUploadModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          <Upload className="w-4 h-4" />
+          <span>Upload Document</span>
+        </button>
+      </div>
+      
+      {/* Use Documents component in embedded mode - it will show employee's accessible folders */}
+      <Documents key={refreshKey} embedded />
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Upload className="w-5 h-5 text-blue-600" />
+                Upload Document for {employee.firstName} {employee.lastName}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-900">
+                  Document will be uploaded to <strong>{employee.firstName}'s My Documents</strong> folder.
+                  The employee will be able to view and manage this document from their dashboard.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select File *
+                </label>
+                <input
+                  type="file"
+                  onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files[0] })}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Category
+                </label>
+                <select
+                  value={uploadForm.category}
+                  onChange={(e) => setUploadForm({ ...uploadForm, category: e.target.value })}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="other">Other</option>
+                  <option value="contract">Contract</option>
+                  <option value="certificate">Certificate</option>
+                  <option value="id_proof">ID Proof</option>
+                  <option value="visa">Visa</option>
+                  <option value="passport">Passport</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description (Optional)
+                </label>
+                <textarea
+                  value={uploadForm.description}
+                  onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
+                  placeholder="Add a description..."
+                  rows={3}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadModal(false)}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  disabled={uploading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUploadToEmployee}
+                  disabled={uploading || !uploadForm.file}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {uploading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Upload</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default EmployeeProfile;
-  const myDocumentsFolder = folders.find(f => f.name === 'My Documents') || null;
-  const hasDefaultFolder = !!myDocumentsFolder;
+
 
   const handleFolderClick = (folder) => {
     setSelectedFolder(folder);
