@@ -74,9 +74,21 @@ const FolderView = () => {
 
   // Fetch folder contents
   useEffect(() => {
-    if (folderId) {
-      fetchFolderContents();
+    if (!folderId) {
+      console.error('❌ FolderView: No folderId provided in URL params');
+      showError('Cannot load folder: Invalid folder ID');
+      navigate('/documents');
+      return;
     }
+    
+    if (folderId === 'undefined' || folderId === 'null') {
+      console.error('❌ FolderView: Received invalid folderId:', folderId);
+      showError('Cannot load folder: Invalid folder ID');
+      navigate('/documents');
+      return;
+    }
+    
+    fetchFolderContents();
   }, [folderId]);
 
   const fetchFolderContents = async () => {
@@ -99,16 +111,20 @@ const FolderView = () => {
         withCredentials: true
       });
       
-      console.log('✅ Folder contents fetched');
+      console.log('✅ Folder contents fetched:', response.data);
       setFolder(response.data.folder);
       setBreadcrumb(Array.isArray(response.data.breadcrumb) ? response.data.breadcrumb : []);
       setItems(response.data.contents || []);
       setFolderPermissions(response.data.folderPermissions || { canView: true, canEdit: true, canDelete: true });
     } catch (error) {
       console.error('❌ Error fetching folder contents:', error);
+      showError('Failed to load folder contents');
       if (error.response?.status === 401 || error.response?.status === 403) {
         console.error('Authentication failed, redirecting to login');
         // The axios interceptor will handle redirect
+      } else if (error.response?.status === 404) {
+        showError('Folder not found');
+        navigate('/documents');
       }
     } finally {
       setLoading(false);

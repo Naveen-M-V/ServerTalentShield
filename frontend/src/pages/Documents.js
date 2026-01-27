@@ -90,14 +90,17 @@ const Documents = ({ embedded = false }) => {
         }
       });
       
-      const existingFolder = response.data.folders?.find(f => f.name === 'My Documents' && f.isDefault);
+      // Find any My Documents folder (regardless of isDefault flag)
+      const existingFolder = response.data.folders?.find(f => 
+        f.name === 'My Documents' || f.name.includes('My Documents')
+      );
       
       if (existingFolder) {
         setMyDocumentsFolder(existingFolder);
         return;
       }
       
-      // Create My Documents folder if it doesn't exist
+      // Only create if none exists
       const folderData = {
         name: 'My Documents',
         description: 'Personal documents',
@@ -156,6 +159,12 @@ const Documents = ({ embedded = false }) => {
   };
 
   const handleFolderClick = (folderId) => {
+    if (!folderId) {
+      console.error('❌ No folder ID provided to handleFolderClick');
+      showError('Cannot open folder: Invalid folder ID');
+      return;
+    }
+    
     if (embedded) {
       setSelectedFolderId(folderId);
       return;
@@ -633,15 +642,21 @@ const Documents = ({ embedded = false }) => {
                 <p className="text-gray-500">Get started by creating your first folder</p>
               </div>
             ) : (
-              filteredFolders.map((folder, index) => (
-                <motion.div
-                  key={folder._id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="grid grid-cols-12 gap-4 px-6 py-3 hover:bg-gray-50 cursor-pointer transition-colors group"
-                  onClick={() => handleFolderClick(folder._id)}
-                >
+              filteredFolders.map((folder, index) => {
+                // Validate folder has required fields
+                if (!folder._id) {
+                  console.error('❌ Folder missing _id:', folder);
+                }
+                
+                return (
+                  <motion.div
+                    key={folder._id || index}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="grid grid-cols-12 gap-4 px-6 py-3 hover:bg-gray-50 cursor-pointer transition-colors group"
+                    onClick={() => handleFolderClick(folder._id)}
+                  >
                   {/* Name */}
                   <div className="col-span-5 flex items-center gap-3">
                     <div className="p-2 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
@@ -720,7 +735,8 @@ const Documents = ({ embedded = false }) => {
                     </div>
                   </div>
                 </motion.div>
-              ))
+              );
+              })
             )}
           </div>
 

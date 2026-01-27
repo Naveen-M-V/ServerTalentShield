@@ -1171,34 +1171,16 @@ const EmergenciesTab = ({ employee }) => {
 
 // Documents Tab with Document Manager
 const DocumentsTab = ({ employee }) => {
-  const { user } = useAuth();
-  // Check multiple possible data structures
-  const folders = employee?.folders || employee?.documents || employee?.documentFolders || [];
-  const [selectedFolder, setSelectedFolder] = useState(null);
-  const [documents, setDocuments] = useState([]);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [documentToDelete, setDocumentToDelete] = useState(null);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showViewerModal, setShowViewerModal] = useState(false);
-  const [selectedDocument, setSelectedDocument] = useState(null);
-  const [uploadForm, setUploadForm] = useState({
-    file: null,
-    category: 'other',
-    description: '',
-    folderName: '',
-    createNewFolder: folders.length === 0
-  });
-  const [uploading, setUploading] = useState(false);
+  // Simply use the Documents component - it will handle everything
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-4">Documents</h3>
+      <Documents embedded />
+    </div>
+  );
+};
 
-  console.log("DocumentsTab - folders:", folders);
-  console.log("DocumentsTab - user:", { role: user?.role, userType: user?.userType });
-
-  // Check if user has admin privileges (admin, super-admin, hr, manager)
-  // Handle both employee-type and profile-type users
-  const ADMIN_ROLES = ['admin', 'super-admin', 'hr', 'manager'];
-  const isAdmin = user?.role && ADMIN_ROLES.includes(user.role);
-
-  // Find or use default "My Documents" folder
+export default EmployeeProfile;
   const myDocumentsFolder = folders.find(f => f.name === 'My Documents') || null;
   const hasDefaultFolder = !!myDocumentsFolder;
 

@@ -83,6 +83,16 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
   };
 
   const canPreview = () => {
+    // Check mimeType first
+    if (document.mimeType) {
+      if (document.mimeType.includes('pdf')) return true;
+      if (document.mimeType.includes('image')) return true;
+      if (document.mimeType.includes('powerpoint') || document.mimeType.includes('presentation')) return true;
+      if (document.mimeType.includes('word') || document.mimeType.includes('wordprocessing')) return true;
+      if (document.mimeType.includes('excel') || document.mimeType.includes('spreadsheet')) return true;
+    }
+    
+    // Fallback to extension check
     const filename = document.name || document.fileName || '';
     const extension = filename && filename.split('.').pop().toLowerCase();
     return extension && [
@@ -92,6 +102,12 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
   };
 
   const isOfficeDocument = () => {
+    console.log('🔍 DocumentViewer - Checking if Office document:', {
+      name: document.name,
+      mimeType: document.mimeType,
+      fileName: document.fileName
+    });
+    
     // Check mimeType first (more reliable)
     if (document.mimeType) {
       const officeMimeTypes = [
@@ -103,11 +119,17 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // XLSX
       ];
       if (officeMimeTypes.includes(document.mimeType)) {
+        console.log('✅ Detected as Office document by mimeType');
         return true;
       }
     }
     // Fallback to extension check
     const filename = document.name || document.fileName || '';
+    const extension = filename && filename.split('.').pop().toLowerCase();
+    const isOffice = extension && ['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(extension);
+    console.log(`${isOffice ? '✅' : '❌'} Detected as Office document by extension:`, extension);
+    return isOffice;
+  };
     const extension = filename && filename.split('.').pop().toLowerCase();
     return extension && ['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(extension);
   };

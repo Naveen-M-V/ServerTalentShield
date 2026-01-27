@@ -40,10 +40,20 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
     
     try {
       const token = localStorage.getItem('auth_token');
+      
+      // Format dates properly - ensure they are Date objects or ISO strings
+      const startDateValue = formData.startDate instanceof Date 
+        ? formData.startDate.toISOString() 
+        : formData.startDate;
+      const endDateValue = (formData.endDate instanceof Date 
+        ? formData.endDate.toISOString() 
+        : formData.endDate) || startDateValue;
+      
       await axios.post(buildApiUrl('/sickness/create'), {
         employeeId: employee._id,
-        startDate: formData.startDate,
-        endDate: formData.endDate || formData.startDate,
+        startDate: startDateValue,
+        endDate: endDateValue,
+        reason: formData.reason,
         sicknessType: formData.reason,
         notes: formData.notes
       }, {

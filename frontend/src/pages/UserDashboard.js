@@ -8,6 +8,7 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import UserClockIns from './UserClockIns';
 import MyShifts from '../components/MyShifts';
+import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
 import Documents from './Documents';
 import LeaveRequestCard from '../components/LeaveManagement/LeaveRequestCard';
 import EmployeeCalendarView from '../components/EmployeeCalendarView';
@@ -1042,7 +1043,10 @@ const UserDashboard = () => {
                 <DocumentTextIcon className="h-6 w-6 mr-3 text-green-600" />
                 E-Learning Materials
               </h2>
-              <ELearningWidget />
+              <ELearningWidget onViewDocument={(material) => {
+                setSelectedDocument(material);
+                setShowDocumentViewer(true);
+              }} />
             </div>
 
             {/* Quick Stats - Clickable Cards */}
@@ -1691,7 +1695,7 @@ const UserDashboard = () => {
 };
 
 // E-Learning Widget Component
-const ELearningWidget = () => {
+const ELearningWidget = ({ onViewDocument }) => {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
   const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
@@ -1821,10 +1825,7 @@ const ELearningWidget = () => {
           </div>
           <div className="flex items-center gap-2 ml-4 flex-shrink-0">
             <button
-              onClick={() => {
-                // Navigate to full e-learning page for viewing
-                window.location.href = '/e-learning';
-              }}
+              onClick={() => onViewDocument(material)}
               className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
               title="View material"
             >
@@ -2075,6 +2076,26 @@ const LeaveStatusSection = ({ userId }) => {
           </div>
         )}
       </div>
+
+      {/* Document Viewer Modal */}
+      {showDocumentViewer && selectedDocument && (
+        <DocumentViewer
+          document={selectedDocument}
+          onClose={() => {
+            setShowDocumentViewer(false);
+            setSelectedDocument(null);
+          }}
+          onDownload={(doc) => {
+            // Use the ELearningWidget download handler
+            const elearningWidget = document.querySelector('[data-elearning-widget]');
+            if (elearningWidget) {
+              // Trigger download - this will be handled by the widget
+              const event = new CustomEvent('download-material', { detail: doc });
+              window.dispatchEvent(event);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
