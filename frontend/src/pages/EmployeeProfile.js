@@ -1191,8 +1191,16 @@ const DocumentsTab = ({ employee }) => {
   const [uploading, setUploading] = useState(false);
 
   console.log("DocumentsTab - folders:", folders);
+  console.log("DocumentsTab - user:", { role: user?.role, userType: user?.userType });
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'super-admin';
+  // Check if user has admin privileges (admin, super-admin, hr, manager)
+  // Handle both employee-type and profile-type users
+  const ADMIN_ROLES = ['admin', 'super-admin', 'hr', 'manager'];
+  const isAdmin = user?.role && ADMIN_ROLES.includes(user.role);
+
+  // Find or use default "My Documents" folder
+  const myDocumentsFolder = folders.find(f => f.name === 'My Documents') || null;
+  const hasDefaultFolder = !!myDocumentsFolder;
 
   const handleFolderClick = (folder) => {
     setSelectedFolder(folder);
@@ -1247,19 +1255,23 @@ const DocumentsTab = ({ employee }) => {
       setUploading(true);
       const token = localStorage.getItem('auth_token');
       
-      // Step 1: Create folder if needed
+      // Step 1: Create or use "My Documents" folder
       let folderId = selectedFolder?._id;
       
-      if (uploadForm.createNewFolder) {
+      if (uploadForm.createNewFolder || !folderId) {
+        // Always create "My Documents" as default folder
+        const folderName = uploadForm.folderName?.trim() || 'My Documents';
         const folderData = {
-          name: uploadForm.folderName.trim(),
+          name: folderName,
           description: `Personal documents for ${employee.firstName} ${employee.lastName}`,
           permissions: {
+            // Add employee to permission arrays
+            // Backend will automatically add current user (admin) via createdByUserId tracking
             viewEmployeeIds: [employee._id],
             editEmployeeIds: [employee._id],
-            deleteEmployeeIds: isAdmin ? [employee._id] : []
+            deleteEmployeeIds: [employee._id]
           },
-          ownerId: employee._id
+          isDefault: folderName === 'My Documents' // Mark as default folder
         };
 
         const folderResponse = await axios.post(
@@ -1535,28 +1547,27 @@ const DocumentsTab = ({ employee }) => {
             
             <div className="space-y-4">
               {/* Folder Selection/Creation */}
-              {folders.length === 0 ? (
+              {folders.length === 0 || !hasDefaultFolder ? (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div className="flex items-start gap-2">
                     <FolderOpen className="w-5 h-5 text-blue-600 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-blue-900">Create Your First Folder</p>
+                      <p className="text-sm font-medium text-blue-900">Upload to My Documents</p>
                       <p className="text-xs text-blue-700 mt-1">
-                        Documents must be organized in folders. Let's create your first one!
+                        A default "My Documents" folder will be created for this employee's documents.
                       </p>
                     </div>
                   </div>
                   <div className="mt-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Folder Name *
-                    </label>
                     <input
                       type="text"
-                      value={uploadForm.folderName}
-                      onChange={(e) => setUploadForm({ ...uploadForm, folderName: e.target.value })}
-                      placeholder="e.g., Certificates, Personal Documents, Contracts"
-                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      value="My Documents"
+                      disabled
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      This folder is accessible to both admin and employee
+                    </p>
                   </div>
                 </div>
               ) : (

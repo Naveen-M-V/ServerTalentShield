@@ -3,6 +3,7 @@ import { XMarkIcon, PlusIcon, TrashIcon, PencilIcon } from '@heroicons/react/24/
 import { DatePicker } from './ui/date-picker';
 import axios from '../utils/axiosConfig';
 import dayjs from 'dayjs';
+import { buildApiUrl } from '../utils/apiConfig';
 
 // Sickness Modal
 export const SicknessModal = ({ employee, onClose, onSuccess }) => {
@@ -23,7 +24,7 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
   const fetchSicknessRecords = async () => {
     try {
       const token = localStorage.getItem('auth_token');
-      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/sickness/employee/${employee._id}`, {
+      const response = await axios.get(buildApiUrl(`/sickness/employee/${employee._id}`), {
         headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
         withCredentials: true
       });
@@ -39,7 +40,7 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
     
     try {
       const token = localStorage.getItem('auth_token');
-      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/sickness/create`, {
+      await axios.post(buildApiUrl('/sickness/create'), {
         employeeId: employee._id,
         startDate: formData.startDate,
         endDate: formData.endDate || formData.startDate,
@@ -67,7 +68,7 @@ export const SicknessModal = ({ employee, onClose, onSuccess }) => {
     
     try {
       const token = localStorage.getItem('auth_token');
-      await axios.delete(`${process.env.REACT_APP_API_BASE_URL}/sickness/${recordId}`, {
+      await axios.delete(buildApiUrl(`/sickness/${recordId}`), {
         headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
         withCredentials: true
       });
@@ -259,7 +260,7 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
   const fetchLatenessRecords = async () => {
     try {
       const token = localStorage.getItem('auth_token');
-      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/lateness/employee/${employee._id}`, {
+      const response = await axios.get(buildApiUrl(`/lateness/employee/${employee._id}`), {
         headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
         withCredentials: true
       });
@@ -284,7 +285,7 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
       const actualStart = new Date(dateObj);
       actualStart.setHours(9, parseInt(formData.minutes), 0, 0); // Add lateness minutes
       
-      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/lateness/create`, {
+      await axios.post(buildApiUrl('/lateness/create'), {
         employeeId: employee._id,
         date: formData.date,
         scheduledStart: scheduledStart.toISOString(),
@@ -313,7 +314,7 @@ export const LatenessModal = ({ employee, onClose, onSuccess }) => {
     
     try {
       const token = localStorage.getItem('auth_token');
-      await axios.delete(`${process.env.REACT_APP_API_BASE_URL}/lateness/${recordId}`, {
+      await axios.delete(buildApiUrl(`/lateness/${recordId}`), {
         headers: { ...(token && { 'Authorization': `Bearer ${token}` }) },
         withCredentials: true
       });
@@ -501,7 +502,7 @@ export const CarryoverModal = ({ employee, onClose, onSuccess }) => {
 
   const fetchCurrentBalance = async () => {
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/leave/balances/current/${employee._id}`);
+      const response = await axios.get(buildApiUrl(`/leave/balances/current/${employee._id}`));
       if (response.data.success && response.data.data) {
         setCurrentBalance(response.data.data);
         setCarryoverDays(response.data.data.carryOverDays || 0);
@@ -526,7 +527,7 @@ export const CarryoverModal = ({ employee, onClose, onSuccess }) => {
     setLoading(true);
     
     try {
-      await axios.put(`${process.env.REACT_APP_API_BASE_URL}/leave/balances/${currentBalance._id}`, {
+      await axios.put(buildApiUrl(`/leave/balances/${currentBalance._id}`), {
         carryOverDays: parseInt(carryoverDays) || 0,
         notes: notes
       });

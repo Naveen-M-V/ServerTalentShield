@@ -5,6 +5,7 @@ import { useClockStatus } from '../context/ClockStatusContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import Cookies from 'js-cookie';
+import axios from 'axios';
 import UserClockIns from './UserClockIns';
 import MyShifts from '../components/MyShifts';
 import Documents from './Documents';
@@ -18,6 +19,7 @@ import EmployeeMap from '../components/employeeLiveMap';
 import { jobRoleCertificateMapping } from '../data/new';
 import Expenses from './Expenses';
 import PerformanceTab from '../components/Performance/PerformanceTab';
+import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
 import {
   PencilIcon,
   PlusIcon,
@@ -1705,6 +1707,8 @@ const MyDocumentsWidget = ({ userId }) => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState(null);
   const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
   useEffect(() => {
@@ -1800,9 +1804,35 @@ const MyDocumentsWidget = ({ userId }) => {
     }
   };
 
-  const handleDownload = (doc) => {
-    if (doc.fileUrl) {
-      window.open(buildDirectUrl(doc.fileUrl), '_blank');
+  const handleViewDocument = (doc) => {
+    setSelectedDocument(doc);
+    setShowDocumentViewer(true);
+  };
+
+  const handleDownload = async (doc) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(
+        buildApiUrl(`/documentManagement/documents/${doc._id}/download`),
+        {
+          headers: {
+            ...(token && { Authorization: `Bearer ${token}` })
+          },
+          responseType: 'blob'
+        }
+      );
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', doc.name || doc.fileName || 'document');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading document:', error);
+      toast.error('Failed to download document');
     }
   };
 
@@ -1915,15 +1945,27 @@ const MyDocumentsWidget = ({ userId }) => {
               </div>
             </div>
           </div>
-          <button
-            onClick={() => handleDownload(doc)}
-            className="ml-4 p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0"
-            title="Download document"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+            <button
+              onClick={() => handleViewDocument(doc)}
+              className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+              title="View document"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => handleDownload(doc)}
+              className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Download document"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </button>
+          </div>
         </div>
       ))}
       </div>
@@ -1959,6 +2001,15 @@ const MyDocumentsWidget = ({ userId }) => {
             </div>
           </div>
         </div>
+      )}
+      
+      {/* Document Viewer Modal */}
+      {showDocumentViewer && selectedDocument && (
+        <DocumentViewer
+          document={selectedDocument}
+          onClose={() => setShowDocumentViewer(false)}
+          onDownload={handleDownload}
+        />
       )}
     </div>
   );
@@ -1997,8 +2048,31 @@ const ELearningWidget = () => {
     }
   };
 
-  const handleDownload = (material) => {
-    window.open(buildDirectUrl(material.fileUrl), '_blank');
+  const handleDownload = async (material) => {
+    try {
+      const url = buildDirectUrl(material.fileUrl);
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(url, {
+        responseType: 'blob',
+        withCredentials: true,
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` })
+        }
+      });
+
+      const blob = new Blob([response.data], { type: material.mimeType || 'application/octet-stream' });
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = material.name || 'material';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download material');
+    }
   };
 
   const getFileIcon = (mimeType) => {
@@ -2070,15 +2144,30 @@ const ELearningWidget = () => {
               </div>
             </div>
           </div>
-          <button
-            onClick={() => handleDownload(material)}
-            className="ml-4 p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors flex-shrink-0"
-            title="Download material"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+            <button
+              onClick={() => {
+                // Navigate to full e-learning page for viewing
+                window.location.href = '/e-learning';
+              }}
+              className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+              title="View material"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => handleDownload(material)}
+              className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+              title="Download material"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </button>
+          </div>
         </div>
       ))}
     </div>

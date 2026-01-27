@@ -78,7 +78,16 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
   const canPreview = () => {
     const filename = document.name || document.fileName || '';
     const extension = filename && filename.split('.').pop().toLowerCase();
-    return extension && ['jpg', 'jpeg', 'png', 'gif', 'svg', 'pdf'].includes(extension);
+    return extension && [
+      'jpg', 'jpeg', 'png', 'gif', 'svg', 'pdf',
+      'pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'
+    ].includes(extension);
+  };
+
+  const isOfficeDocument = () => {
+    const filename = document.name || document.fileName || '';
+    const extension = filename && filename.split('.').pop().toLowerCase();
+    return extension && ['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(extension);
   };
 
   const FileIcon = getFileIcon();
@@ -167,6 +176,12 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
                   ) : document.mimeType === 'application/pdf' ? (
                     <iframe
                       src={fileUrl}
+                      className="w-full h-full border-0"
+                      title={document.name || document.fileName}
+                    />
+                  ) : isOfficeDocument() ? (
+                    <iframe
+                      src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`}
                       className="w-full h-full border-0"
                       title={document.name || document.fileName}
                     />

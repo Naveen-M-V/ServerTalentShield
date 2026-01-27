@@ -225,11 +225,6 @@ const Documents = ({ embedded = false }) => {
     return name.includes(query);
   });
 
-  const handleCreateReport = () => {
-    // Navigate to report library page
-    navigate('/report-library');
-  };
-
   const handleFolderCreated = () => {
     setShowCreateFolderModal(false);
     fetchFolders();
@@ -363,14 +358,6 @@ const Documents = ({ embedded = false }) => {
               >
                 <Plus className="w-4 h-4" />
                 Create Folder
-              </button>
-
-              {/* Create Report Button */}
-              <button
-                onClick={handleCreateReport}
-                className="px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium text-sm"
-              >
-                Create report
               </button>
             </div>
           </div>

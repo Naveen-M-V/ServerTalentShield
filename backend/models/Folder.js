@@ -27,6 +27,7 @@ const folderSchema = new mongoose.Schema({
 
   // Access Control
   permissions: {
+    // Employee-based permissions (for employee users with EmployeeHub records)
     viewEmployeeIds: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'EmployeeHub',
@@ -40,6 +41,22 @@ const folderSchema = new mongoose.Schema({
     deleteEmployeeIds: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'EmployeeHub',
+      index: true
+    }],
+    // User-based permissions (for profile-type admins with User records only)
+    viewUserIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true
+    }],
+    editUserIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true
+    }],
+    deleteUserIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
       index: true
     }]
   },
@@ -74,31 +91,61 @@ const folderSchema = new mongoose.Schema({
   timestamps: true // Automatically adds createdAt and updatedAt
 });
 
-// Instance method to check permission (employee-based)
+// Instance method to check permission (supports both employee and user-based)
 folderSchema.methods.hasPermission = function(action, user) {
   const role = user?.role || 'employee';
   if (role === 'admin' || role === 'super-admin') return true;
 
   const employeeId = user?.employeeId;
+  const userId = user?._id || user?.userId || user?.id;
   const empIdStr = employeeId ? employeeId.toString() : null;
+  const userIdStr = userId ? userId.toString() : null;
 
   const perms = this.permissions || {};
-  const viewIds = Array.isArray(perms.viewEmployeeIds) ? perms.viewEmployeeIds.map(v => v.toString()) : [];
-  const editIds = Array.isArray(perms.editEmployeeIds) ? perms.editEmployeeIds.map(v => v.toString()) : [];
-  const deleteIds = Array.isArray(perms.deleteEmployeeIds) ? perms.deleteEmployeeIds.map(v => v.toString()) : [];
+  
+  // Employee-based permission arrays
+  const viewEmpIds = Array.isArray(perms.viewEmployeeIds) ? perms.viewEmployeeIds.map(v => v.toString()) : [];
+  const editEmpIds = Array.isArray(perms.editEmployeeIds) ? perms.editEmployeeIds.map(v => v.toString()) : [];
+  const deleteEmpIds = Array.isArray(perms.deleteEmployeeIds) ? perms.deleteEmployeeIds.map(v => v.toString()) : [];
+  
+  // User-based permission arrays (for profile-type admins)
+  const viewUserIds = Array.isArray(perms.viewUserIds) ? perms.viewUserIds.map(v => v.toString()) : [];
+  const editUserIds = Array.isArray(perms.editUserIds) ? perms.editUserIds.map(v => v.toString()) : [];
+  const deleteUserIds = Array.isArray(perms.deleteUserIds) ? perms.deleteUserIds.map(v => v.toString()) : [];
 
-  // Prefer employee-based permissions when configured
-  const hasEmployeePerms = viewIds.length > 0 || editIds.length > 0 || deleteIds.length > 0;
-  if (hasEmployeePerms) {
-    if (!empIdStr) return false;
-    if (action === 'view' || action === 'download') {
-      return viewIds.includes(empIdStr) || editIds.includes(empIdStr) || deleteIds.includes(empIdStr);
+  // Check permissions based on action type
+  if (action === 'view' || action === 'download') {
+    // Check employee permissions
+    if (empIdStr && (viewEmpIds.includes(empIdStr) || editEmpIds.includes(empIdStr) || deleteEmpIds.includes(empIdStr))) {
+      return true;
     }
-    if (action === 'edit' || action === 'upload') {
-      return editIds.includes(empIdStr) || deleteIds.includes(empIdStr);
+    // Check user permissions (for profile admins)
+    if (userIdStr && (viewUserIds.includes(userIdStr) || editUserIds.includes(userIdStr) || deleteUserIds.includes(userIdStr))) {
+      return true;
     }
-    if (action === 'delete') {
-      return deleteIds.includes(empIdStr);
+    return false;
+  }
+  
+  if (action === 'edit' || action === 'upload') {
+    // Check employee permissions
+    if (empIdStr && (editEmpIds.includes(empIdStr) || deleteEmpIds.includes(empIdStr))) {
+      return true;
+    }
+    // Check user permissions (for profile admins)
+    if (userIdStr && (editUserIds.includes(userIdStr) || deleteUserIds.includes(userIdStr))) {
+      return true;
+    }
+    return false;
+  }
+  
+  if (action === 'delete') {
+    // Check employee permissions
+    if (empIdStr && deleteEmpIds.includes(empIdStr)) {
+      return true;
+    }
+    // Check user permissions (for profile admins)
+    if (userIdStr && deleteUserIds.includes(userIdStr)) {
+      return true;
     }
     return false;
   }

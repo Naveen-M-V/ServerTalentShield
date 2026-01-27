@@ -51,23 +51,43 @@ const normalizeIdArray = (value) => {
   return [];
 };
 
-const enforcePermissionHierarchy = ({ viewEmployeeIds, editEmployeeIds, deleteEmployeeIds }) => {
-  const viewSet = new Set(normalizeIdArray(viewEmployeeIds));
-  const editSet = new Set(normalizeIdArray(editEmployeeIds));
-  const deleteSet = new Set(normalizeIdArray(deleteEmployeeIds));
+const enforcePermissionHierarchy = ({ 
+  viewEmployeeIds, editEmployeeIds, deleteEmployeeIds,
+  viewUserIds, editUserIds, deleteUserIds 
+}) => {
+  // Employee permission hierarchy
+  const viewEmpSet = new Set(normalizeIdArray(viewEmployeeIds));
+  const editEmpSet = new Set(normalizeIdArray(editEmployeeIds));
+  const deleteEmpSet = new Set(normalizeIdArray(deleteEmployeeIds));
 
-  for (const id of deleteSet) {
-    editSet.add(id);
-    viewSet.add(id);
+  for (const id of deleteEmpSet) {
+    editEmpSet.add(id);
+    viewEmpSet.add(id);
   }
-  for (const id of editSet) {
-    viewSet.add(id);
+  for (const id of editEmpSet) {
+    viewEmpSet.add(id);
+  }
+
+  // User permission hierarchy (for profile admins)
+  const viewUserSet = new Set(normalizeIdArray(viewUserIds));
+  const editUserSet = new Set(normalizeIdArray(editUserIds));
+  const deleteUserSet = new Set(normalizeIdArray(deleteUserIds));
+
+  for (const id of deleteUserSet) {
+    editUserSet.add(id);
+    viewUserSet.add(id);
+  }
+  for (const id of editUserSet) {
+    viewUserSet.add(id);
   }
 
   return {
-    viewEmployeeIds: Array.from(viewSet),
-    editEmployeeIds: Array.from(editSet),
-    deleteEmployeeIds: Array.from(deleteSet)
+    viewEmployeeIds: Array.from(viewEmpSet),
+    editEmployeeIds: Array.from(editEmpSet),
+    deleteEmployeeIds: Array.from(deleteEmpSet),
+    viewUserIds: Array.from(viewUserSet),
+    editUserIds: Array.from(editUserSet),
+    deleteUserIds: Array.from(deleteUserSet)
   };
 };
 
@@ -92,8 +112,17 @@ const requireFolderPermission = (action) => {
       if (!folder) return res.status(404).json({ message: 'Folder not found' });
       req.folder = folder;
 
-      // Creator can always access
+      // Creator can always access (check both User ID and Employee ID)
+      const userId = req.user._id || req.user.userId || req.user.id;
+      const userIdStr = userId ? userId.toString() : null;
       const empId = req.user.employeeId ? req.user.employeeId.toString() : null;
+      
+      // Check if user is creator (via User ID for profile admins)
+      if (userIdStr && folder.createdByUserId && folder.createdByUserId.toString() === userIdStr) {
+        return next();
+      }
+      
+      // Check if user is creator (via Employee ID for employees)
       if (empId && folder.createdByEmployeeId && folder.createdByEmployeeId.toString() === empId) {
         return next();
       }
@@ -132,23 +161,40 @@ router.get('/documents', async (req, res) => {
         return res.json([]);
       }
 
-      // Limit to folders the employee can view (prevents folder permission bypass)
-      const allowedFolders = await Folder.find({
-        isActive: true,
-        $or: [
+      // Limit to folders the user can view (prevents folder permission bypass)
+      const userId = req.user._id || req.user.userId || req.user.id;
+      const folderOrConditions = [];
+      
+      if (userId) {
+        folderOrConditions.push(
+          { createdByUserId: userId },
+          { 'permissions.viewUserIds': userId },
+          { 'permissions.editUserIds': userId },
+          { 'permissions.deleteUserIds': userId }
+        );
+      }
+      
+      if (empId) {
+        folderOrConditions.push(
           { createdByEmployeeId: empId },
           { 'permissions.viewEmployeeIds': empId },
           { 'permissions.editEmployeeIds': empId },
           { 'permissions.deleteEmployeeIds': empId }
-        ]
+        );
+      }
+      
+      const allowedFolders = await Folder.find({
+        isActive: true,
+        $or: folderOrConditions
       }).select('_id');
       const allowedFolderIds = allowedFolders.map(f => f._id);
 
-      // Employee: only permitted documents
+      // Employee/User: only permitted documents
       const docAccessOr = [
         { 'accessControl.visibility': 'all' },
         { 'accessControl.visibility': 'employee', ownerId: empId },
-        { 'accessControl.allowedUserIds': userId }
+        { 'accessControl.allowedUserIds': userId },
+        { uploadedBy: userId } // Profile admins can see documents they uploaded
       ];
 
       query.$or = [
@@ -277,9 +323,16 @@ const checkPermission = (action) => {
             return res.status(404).json({ message: 'Folder not found' });
           }
 
-          // Creator can always access
+          // Creator can always access (check both User ID and Employee ID)
+          const userId = req.user._id || req.user.userId || req.user.id;
+          const userIdStr = userId ? userId.toString() : null;
           const empId = req.user.employeeId ? req.user.employeeId.toString() : null;
-          if (!(empId && folder.createdByEmployeeId && folder.createdByEmployeeId.toString() === empId)) {
+          
+          const isCreator = 
+            (userIdStr && folder.createdByUserId && folder.createdByUserId.toString() === userIdStr) ||
+            (empId && folder.createdByEmployeeId && folder.createdByEmployeeId.toString() === empId);
+          
+          if (!isCreator) {
             if (!folder.hasPermission(action, req.user)) {
               return res.status(403).json({ message: 'Insufficient permissions' });
             }
@@ -368,13 +421,37 @@ router.get('/folders', async (req, res) => {
       return res.json({ success: true, folders: [] });
     }
 
-    if (!isAdminLike && empId) {
-      folderQuery.$or = [
-        { createdByEmployeeId: req.user.employeeId },
-        { 'permissions.viewEmployeeIds': req.user.employeeId },
-        { 'permissions.editEmployeeIds': req.user.employeeId },
-        { 'permissions.deleteEmployeeIds': req.user.employeeId }
-      ];
+    if (!isAdminLike) {
+      const userId = req.user._id || req.user.userId || req.user.id;
+      const orConditions = [];
+      
+      // Add User ID checks (for profile admins)
+      if (userId) {
+        orConditions.push(
+          { createdByUserId: userId },
+          { 'permissions.viewUserIds': userId },
+          { 'permissions.editUserIds': userId },
+          { 'permissions.deleteUserIds': userId }
+        );
+      }
+      
+      // Add Employee ID checks (for employees)
+      if (empId) {
+        orConditions.push(
+          { createdByEmployeeId: empId },
+          { 'permissions.viewEmployeeIds': empId },
+          { 'permissions.editEmployeeIds': empId },
+          { 'permissions.deleteEmployeeIds': empId }
+        );
+      }
+      
+      if (orConditions.length > 0) {
+        folderQuery.$or = orConditions;
+      } else {
+        // No user or employee ID - return empty
+        res.set('Cache-Control', 'no-store');
+        return res.json({ success: true, folders: [] });
+      }
     }
 
     const folders = await Folder.find(folderQuery)
@@ -386,23 +463,41 @@ router.get('/folders', async (req, res) => {
       let documentCountQuery = { folderId: folder._id, isActive: true, isArchived: false };
       if (req.user && req.user.role !== 'admin' && req.user.role !== 'super-admin') {
         const userId = req.user?._id || req.user?.userId || req.user?.id;
+        const docCountOr = [
+          { 'accessControl.visibility': 'all' },
+          { 'accessControl.allowedUserIds': userId },
+          { uploadedBy: userId } // User can see documents they uploaded
+        ];
+        
+        // Add employee-specific check if user has employeeId
+        if (req.user.employeeId) {
+          docCountOr.push({ 'accessControl.visibility': 'employee', ownerId: req.user.employeeId });
+        }
+        
         documentCountQuery = {
           folderId: folder._id,
           isActive: true,
           isArchived: false,
-          $or: [
-            { 'accessControl.visibility': 'all' },
-            { 'accessControl.visibility': 'employee', ownerId: req.user.employeeId },
-            { 'accessControl.allowedUserIds': userId }
-          ]
+          $or: docCountOr
         };
       }
       const documentCount = await DocumentManagement.countDocuments(documentCountQuery);
+      
+      // Enhanced permission checks for folder
+      const userId = req.user?._id || req.user?.userId || req.user?.id;
+      const canEditFolder = isAdminLike ? true : (
+        (userId && folder.createdByUserId && folder.createdByUserId.toString() === userId.toString()) ||
+        folder.hasPermission('edit', req.user)
+      );
+      const canDeleteFolder = isAdminLike ? true : (
+        (userId && folder.createdByUserId && folder.createdByUserId.toString() === userId.toString()) ||
+        folder.hasPermission('delete', req.user)
+      );
       return {
         ...folder.toObject(),
         canView: true,
-        canEdit: isAdminLike ? true : folder.hasPermission('edit', req.user),
-        canDelete: isAdminLike ? true : folder.hasPermission('delete', req.user),
+        canEdit: canEditFolder,
+        canDelete: canDeleteFolder,
         documentCount
       };
     }));
