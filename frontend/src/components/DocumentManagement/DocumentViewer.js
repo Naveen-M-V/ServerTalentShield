@@ -11,7 +11,9 @@ import {
   User,
   Tag,
   Shield,
-  Clock
+  Clock,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 import axios from 'axios';
 import '../../utils/axiosConfig';
@@ -20,6 +22,7 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
   const [loading, setLoading] = useState(false);
   const [fileUrl, setFileUrl] = useState(null);
   const [error, setError] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (document) {
@@ -62,6 +65,10 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
+  };
+
   const getFileIcon = () => {
     const filename = document.name || document.fileName || '';
     const extension = filename && filename.split('.').pop().toLowerCase();
@@ -85,6 +92,21 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
   };
 
   const isOfficeDocument = () => {
+    // Check mimeType first (more reliable)
+    if (document.mimeType) {
+      const officeMimeTypes = [
+        'application/vnd.ms-powerpoint', // PPT
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation', // PPTX
+        'application/msword', // DOC
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
+        'application/vnd.ms-excel', // XLS
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // XLSX
+      ];
+      if (officeMimeTypes.includes(document.mimeType)) {
+        return true;
+      }
+    }
+    // Fallback to extension check
     const filename = document.name || document.fileName || '';
     const extension = filename && filename.split('.').pop().toLowerCase();
     return extension && ['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(extension);
@@ -114,7 +136,9 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col"
+          className={`bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ${
+            isFullscreen ? 'fixed inset-0 w-screen h-screen max-w-none max-h-screen rounded-none' : 'w-full max-w-5xl max-h-[95vh]'
+          }`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -129,6 +153,13 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
               </div>
             </div>
             <div className="flex items-center space-x-2">
+              <button
+                onClick={toggleFullscreen}
+                className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white"
+                title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              >
+                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+              </button>
               <button
                 onClick={() => onDownload(document)}
                 className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white"
@@ -202,8 +233,9 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
               )}
             </div>
 
-            {/* Metadata Sidebar */}
-            <div className="w-80 bg-white border-l overflow-y-auto p-6">
+            {/* Metadata Sidebar - Hidden in fullscreen */}
+            {!isFullscreen && (
+              <div className="w-80 bg-white border-l overflow-y-auto p-6">
               <h3 className="text-lg font-bold text-gray-900 mb-4">Document Details</h3>
               
               <div className="space-y-4">
@@ -311,7 +343,7 @@ const DocumentViewer = ({ document, onClose, onDownload }) => {
                 </button>
               </div>
             </div>
-          </div>
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>

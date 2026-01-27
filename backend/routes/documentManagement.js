@@ -270,6 +270,8 @@ const upload = multer({
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', // PPT
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation', // PPTX
       'image/jpeg',
       'image/png',
       'image/gif',

@@ -13,7 +13,9 @@ import {
   MoreVertical,
   Plus,
   Pencil,
-  Trash2
+  Trash2,
+  Upload,
+  Eye
 } from 'lucide-react';
 import axios from 'axios';
 import {
@@ -35,11 +37,14 @@ import {
   SelectValue
 } from '../components/ui/select';
 import CreateFolderModal from '../components/DocumentManagement/CreateFolderModal';
+import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
 import { buildApiUrl } from '../utils/apiConfig';
+import { useAuth } from '../context/AuthContext';
 
 const Documents = ({ embedded = false }) => {
   const navigate = useNavigate();
   const { error: showError, success: showSuccess } = useAlert();
+  const { user } = useAuth();
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [folderLoading, setFolderLoading] = useState(false);
@@ -56,6 +61,66 @@ const Documents = ({ embedded = false }) => {
   const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
   const [activeFolder, setActiveFolder] = useState(null);
   const [renameFolderValue, setRenameFolderValue] = useState('');
+  
+  // My Documents functionality
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadForm, setUploadForm] = useState({ file: null, category: 'other', description: '' });
+  const [myDocumentsFolder, setMyDocumentsFolder] = useState(null);
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState(null);
+
+  // Auto-create "My Documents" folder on mount
+  useEffect(() => {
+    ensureMyDocumentsFolder();
+  }, [user]);
+
+  const ensureMyDocumentsFolder = async () => {
+    if (!user) return;
+    
+    try {
+      const token = localStorage.getItem('auth_token');
+      const apiUrl = process.env.REACT_APP_API_URL || 'https://hrms.talentshield.co.uk';
+      
+      // Check if My Documents already exists
+      const response = await axios.get(`${apiUrl}/api/documentManagement/folders`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const existingFolder = response.data.folders?.find(f => f.name === 'My Documents' && f.isDefault);
+      
+      if (existingFolder) {
+        setMyDocumentsFolder(existingFolder);
+        return;
+      }
+      
+      // Create My Documents folder if it doesn't exist
+      const folderData = {
+        name: 'My Documents',
+        description: 'Personal documents',
+        isDefault: true
+      };
+      
+      const createResponse = await axios.post(
+        `${apiUrl}/api/documentManagement/folders`,
+        folderData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      setMyDocumentsFolder(createResponse.data);
+      fetchFolders(); // Refresh folder list
+    } catch (error) {
+      console.error('Error ensuring My Documents folder:', error);
+    }
+  };
 
   // Fetch folders from API
   useEffect(() => {
@@ -238,6 +303,92 @@ const Documents = ({ embedded = false }) => {
     setPagination(prev => ({ ...prev, page: newPage }));
   };
 
+  // My Documents handlers
+  const handleUploadToMyDocuments = () => {
+    setUploadForm({ file: null, category: 'other', description: '' });
+    setShowUploadModal(true);
+  };
+
+  const handleUploadSubmit = async () => {
+    if (!uploadForm.file) {
+      showError('Please select a file');
+      return;
+    }
+
+    if (!myDocumentsFolder?._id) {
+      showError('My Documents folder not found');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const token = localStorage.getItem('auth_token');
+      
+      const formData = new FormData();
+      formData.append('file', uploadForm.file);
+      formData.append('category', uploadForm.category);
+      formData.append('folderId', myDocumentsFolder._id);
+      if (uploadForm.description) {
+        formData.append('description', uploadForm.description);
+      }
+
+      await axios.post(
+        buildApiUrl('/documentManagement/documents/upload'),
+        formData,
+        {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+          withCredentials: true
+        }
+      );
+
+      showSuccess('Document uploaded successfully!');
+      setShowUploadModal(false);
+      setUploadForm({ file: null, category: 'other', description: '' });
+      
+      // Refresh My Documents folder contents
+      if (selectedFolderId === myDocumentsFolder._id) {
+        fetchFolderContents(myDocumentsFolder._id);
+      }
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      showError(error.response?.data?.message || 'Failed to upload document');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleViewDocument = (doc) => {
+    setSelectedDocument(doc);
+    setShowDocumentViewer(true);
+  };
+
+  const handleDownloadDocument = async (doc) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await axios.get(
+        buildApiUrl(`/documentManagement/documents/${doc._id}/download`),
+        {
+          headers: {
+            ...(token && { Authorization: `Bearer ${token}` })
+          },
+          responseType: 'blob'
+        }
+      );
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', doc.name || doc.fileName || 'document');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading document:', error);
+      showError('Failed to download document');
+    }
+  };
+
   const totalPages = Math.ceil(pagination.total / pagination.limit);
 
   if (embedded && selectedFolderId) {
@@ -274,24 +425,32 @@ const Documents = ({ embedded = false }) => {
           <div className="divide-y divide-gray-200">
             {folderContents.map((item) => (
               <div key={item._id || item.id} className="py-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <FileText className="w-5 h-5 text-gray-500" />
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{item.name || item.fileName || 'Document'}</div>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <FileText className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">{item.name || item.fileName || 'Document'}</div>
                     <div className="text-xs text-gray-500">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ''}</div>
                   </div>
                 </div>
 
-                {item.fileUrl && (
+                <div className="flex items-center gap-2 ml-4">
                   <button
                     type="button"
-                    onClick={() => window.open(item.fileUrl, '_blank')}
-                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                    title="Open"
+                    onClick={() => handleViewDocument(item)}
+                    className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                    title="View document"
                   >
-                    <ChevronRight className="w-5 h-5" />
+                    <Eye className="w-4 h-4" />
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadDocument(item)}
+                    className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Download document"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -306,7 +465,89 @@ const Documents = ({ embedded = false }) => {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Documents</h1>
-          <p className="text-gray-600">All folders</p>
+          <p className="text-gray-600">Manage your personal documents and folders</p>
+        </div>
+
+        {/* My Documents Section */}
+        {myDocumentsFolder && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 rounded-lg">
+                  <Folder className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">My Documents</h2>
+                  <p className="text-sm text-gray-600">Your personal document folder</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleUploadToMyDocuments}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Upload className="w-4 h-4" />
+                  Upload Document
+                </button>
+                <button
+                  onClick={() => handleFolderClick(myDocumentsFolder._id)}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  View All
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Recent documents preview */}
+            {selectedFolderId === myDocumentsFolder._id && folderContents.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {folderContents.slice(0, 3).map((doc) => (
+                  <div
+                    key={doc._id}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <FileText className="w-5 h-5 text-gray-500" />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-gray-900 truncate">{doc.name || doc.fileName}</h4>
+                        <p className="text-sm text-gray-500">
+                          {doc.createdAt ? new Date(doc.createdAt).toLocaleDateString() : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewDocument(doc);
+                        }}
+                        className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                        title="View document"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadDocument(doc);
+                        }}
+                        className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Download document"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Divider */}
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">All Folders</h2>
         </div>
 
         {/* Search and Actions */}
@@ -584,6 +825,90 @@ const Documents = ({ embedded = false }) => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Upload Document to My Documents</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select File
+                </label>
+                <input
+                  type="file"
+                  onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files[0] })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Category
+                </label>
+                <select
+                  value={uploadForm.category}
+                  onChange={(e) => setUploadForm({ ...uploadForm, category: e.target.value })}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="other">Other</option>
+                  <option value="contract">Contract</option>
+                  <option value="certificate">Certificate</option>
+                  <option value="identification">Identification</option>
+                  <option value="training">Training</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description (optional)
+                </label>
+                <textarea
+                  value={uploadForm.description}
+                  onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
+                  className="w-full p-2 border rounded"
+                  rows="3"
+                  placeholder="Add a description..."
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => {
+                  setShowUploadModal(false);
+                  setUploadForm({ file: null, category: 'other', description: '' });
+                }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                disabled={uploading}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUploadSubmit}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                disabled={uploading || !uploadForm.file}
+              >
+                {uploading ? 'Uploading...' : 'Upload'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document Viewer Modal */}
+      {showDocumentViewer && selectedDocument && (
+        <DocumentViewer
+          document={selectedDocument}
+          onClose={() => {
+            setShowDocumentViewer(false);
+            setSelectedDocument(null);
+          }}
+          onDownload={handleDownloadDocument}
+        />
+      )}
     </div>
   );
 };

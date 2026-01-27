@@ -195,10 +195,6 @@ const DocumentPageView = ({ selectedFolder, onClose, onBack }) => {
               <Plus className="w-4 h-4" />
               <span>New folder</span>
             </button>
-            <button className="px-4 py-2 border border-green-500 text-green-500 rounded-lg hover:bg-green-50 flex items-center space-x-2">
-              <FileText className="w-4 h-4" />
-              <span>Create report</span>
-            </button>
           </div>
         </div>
 

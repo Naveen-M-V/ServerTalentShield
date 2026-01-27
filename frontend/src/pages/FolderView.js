@@ -396,24 +396,6 @@ const FolderView = () => {
                 Upload file
               </button>
             )}
-
-            {(folderPermissions?.canEdit ?? true) && (
-              <button
-                onClick={() => setShowCreateFolderModal(true)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Create Folder
-              </button>
-            )}
-
-            {/* Create Report Button */}
-            <button
-              onClick={handleCreateReport}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
-            >
-              Create report
-            </button>
           </div>
         </div>
       </div>

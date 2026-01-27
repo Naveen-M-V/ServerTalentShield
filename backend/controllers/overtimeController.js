@@ -268,11 +268,12 @@ const approveOvertime = async (req, res) => {
       return res.status(403).json({ message: 'Admin access required' });
     }
 
-    // Resolve admin employee ID
+    // Resolve admin employee ID - may be null for profile-type admins
     const adminEmployeeId = await resolveEmployeeIdForRequest(req);
-    if (!adminEmployeeId) {
-      return res.status(403).json({ message: 'Admin employee ID could not be resolved' });
-    }
+    
+    // Profile-type admins (super-admin) may not have EmployeeHub record
+    // This is ALLOWED - we'll use approvedByUserId instead
+    const isProfileAdmin = !adminEmployeeId && ADMIN_ROLES.includes(req.user?.role);
 
     // Find and update overtime entry
     const overtime = await Overtime.findById(overtimeId);
@@ -287,11 +288,17 @@ const approveOvertime = async (req, res) => {
     }
 
     overtime.approvalStatus = 'approved';
-    overtime.approvedBy = adminEmployeeId;
+    
+    // Set approvedBy only if admin has EmployeeHub record
+    // Profile admins will only have approvedByUserId set
+    if (adminEmployeeId) {
+      overtime.approvedBy = adminEmployeeId;
+    }
+    
     overtime.approvedAt = new Date();
     overtime.rejectionReason = null;
 
-    // Track admin User ID (actor/subject tracking)
+    // Track admin User ID (ACTOR/SUBJECT pattern - always track User._id)
     const actorUserId = req.user?._id || req.user?.userId || req.user?.id;
     const actorRole = req.user?.role || req.user?.userType;
     if (actorRole && ADMIN_ROLES.includes(actorRole)) {
@@ -328,11 +335,12 @@ const rejectOvertime = async (req, res) => {
       return res.status(403).json({ message: 'Admin access required' });
     }
 
-    // Resolve admin employee ID
+    // Resolve admin employee ID - may be null for profile-type admins
     const adminEmployeeId = await resolveEmployeeIdForRequest(req);
-    if (!adminEmployeeId) {
-      return res.status(403).json({ message: 'Admin employee ID could not be resolved' });
-    }
+    
+    // Profile-type admins (super-admin) may not have EmployeeHub record
+    // This is ALLOWED - we'll use approvedByUserId instead
+    const isProfileAdmin = !adminEmployeeId && ADMIN_ROLES.includes(req.user?.role);
 
     // Find and update overtime entry
     const overtime = await Overtime.findById(overtimeId);
@@ -347,11 +355,17 @@ const rejectOvertime = async (req, res) => {
     }
 
     overtime.approvalStatus = 'rejected';
-    overtime.approvedBy = adminEmployeeId;
+    
+    // Set approvedBy only if admin has EmployeeHub record
+    // Profile admins will only have approvedByUserId set
+    if (adminEmployeeId) {
+      overtime.approvedBy = adminEmployeeId;
+    }
+    
     overtime.approvedAt = new Date();
     overtime.rejectionReason = reason || 'No reason provided';
 
-    // Track admin User ID (actor/subject tracking)
+    // Track admin User ID (ACTOR/SUBJECT pattern - always track User._id)
     const actorUserId = req.user?._id || req.user?.userId || req.user?.id;
     const actorRole = req.user?.role || req.user?.userType;
     if (actorRole && ADMIN_ROLES.includes(actorRole)) {

@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Upload, Download, Trash2, FileText, X, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Upload, Download, Trash2, FileText, X, Eye } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import axios from 'axios';
 import { buildApiUrl, buildDirectUrl } from '../utils/apiConfig';
 import { formatDateDDMMYY } from '../utils/dateFormatter';
 import { isAdmin } from '../utils/authUtils';
-import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
@@ -19,13 +19,6 @@ const ELearning = () => {
   const [downloadingId, setDownloadingId] = useState(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerMaterial, setViewerMaterial] = useState(null);
-  const [pdfDoc, setPdfDoc] = useState(null);
-  const [numPages, setNumPages] = useState(0);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfError, setPdfError] = useState('');
-  const canvasRef = useRef(null);
-  const touchStartXRef = useRef(null);
   const [uploadForm, setUploadForm] = useState({
     file: null,
     title: '',
@@ -162,111 +155,7 @@ await axios.post(
   const closePdfViewer = () => {
     setViewerOpen(false);
     setViewerMaterial(null);
-    setPdfDoc(null);
-    setNumPages(0);
-    setPageNumber(1);
-    setPdfLoading(false);
-    setPdfError('');
   };
-
-  const onTouchStart = (e) => {
-    const x = e.touches?.[0]?.clientX;
-    touchStartXRef.current = typeof x === 'number' ? x : null;
-  };
-
-  const onTouchEnd = (e) => {
-    const startX = touchStartXRef.current;
-    touchStartXRef.current = null;
-    if (startX === null) return;
-    const endX = e.changedTouches?.[0]?.clientX;
-    if (typeof endX !== 'number') return;
-    const delta = endX - startX;
-    if (Math.abs(delta) < 50) return;
-    if (delta < 0) {
-      setPageNumber((p) => (numPages ? Math.min(numPages, p + 1) : p));
-    } else {
-      setPageNumber((p) => Math.max(1, p - 1));
-    }
-  };
-
-  useEffect(() => {
-    const loadPdf = async () => {
-      if (!viewerOpen || !viewerMaterial) return;
-      if (!viewerMaterial?.mimeType?.includes('pdf')) return;
-
-      try {
-        setPdfError('');
-        setPdfLoading(true);
-        setPdfDoc(null);
-        setNumPages(0);
-        setPageNumber(1);
-
-        const url = buildDirectUrl(viewerMaterial.fileUrl);
-        const token = localStorage.getItem('auth_token');
-
-        // Fetch PDF as blob with authentication
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-          credentials: 'include'
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-
-        const task = pdfjsLib.getDocument({
-          url: blobUrl,
-          disableWorker: true
-        });
-
-        const doc = await task.promise;
-        setPdfDoc(doc);
-        setNumPages(doc.numPages || 0);
-        
-        // Clean up blob URL when component unmounts
-        return () => URL.revokeObjectURL(blobUrl);
-      } catch (error) {
-        console.error('Failed to load PDF:', error);
-        setPdfError(`Failed to load PDF: ${error.message}`);
-      } finally {
-        setPdfLoading(false);
-      }
-    };
-
-    loadPdf();
-  }, [viewerOpen, viewerMaterial]);
-
-  useEffect(() => {
-    const render = async () => {
-      if (!pdfDoc) return;
-      if (!canvasRef.current) return;
-      if (!numPages) return;
-      if (pageNumber < 1 || pageNumber > numPages) return;
-
-      try {
-        setPdfLoading(true);
-        const page = await pdfDoc.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.35 });
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      } catch (error) {
-        console.error('Failed to render PDF page:', error);
-        setPdfError('Failed to render PDF');
-      } finally {
-        setPdfLoading(false);
-      }
-    };
-
-    render();
-  }, [pdfDoc, pageNumber, numPages]);
 
   const getFileIcon = (mimeType) => {
     if (mimeType?.includes('pdf')) return '📄';
@@ -491,106 +380,13 @@ await axios.post(
         </div>
       )}
 
-      {viewerOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-5xl shadow-xl max-h-[95vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">{viewerMaterial?.name || 'Document Viewer'}</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  {viewerMaterial?.mimeType?.includes('pdf') ? 'Swipe left/right or use arrows to change pages.' : 'Viewing presentation'}
-                </p>
-              </div>
-              <button onClick={closePdfViewer} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-hidden px-6 py-4"
-              onTouchStart={viewerMaterial?.mimeType?.includes('pdf') ? onTouchStart : undefined}
-              onTouchEnd={viewerMaterial?.mimeType?.includes('pdf') ? onTouchEnd : undefined}
-            >
-              {pdfError ? (
-                <div className="p-8 text-center text-red-600">{pdfError}</div>
-              ) : pdfLoading && !pdfDoc ? (
-                <div className="p-8 text-center text-gray-600">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <div className="mt-3">Loading {getFileType(viewerMaterial?.mimeType)}...</div>
-                </div>
-              ) : viewerMaterial?.mimeType?.includes('pdf') ? (
-                <div className="flex justify-center h-full items-center">
-                  <canvas ref={canvasRef} className="max-w-full shadow-lg" />
-                </div>
-              ) : (viewerMaterial?.mimeType?.includes('presentation') || viewerMaterial?.mimeType?.includes('powerpoint')) ? (
-                <div className="h-full w-full flex flex-col items-center justify-center gap-4">
-                  <div className="text-center">
-                    <FileText className="w-16 h-16 text-blue-600 mx-auto mb-4" />
-                    <p className="text-gray-700 text-lg font-medium mb-2">PowerPoint Presentation</p>
-                    <p className="text-gray-500 text-sm mb-4">
-                      Click the download button below to view this presentation
-                    </p>
-                    <button
-                      onClick={() => handleDownload(viewerMaterial)}
-                      className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                      disabled={downloadingId === viewerMaterial?._id}
-                    >
-                      <Download className="w-5 h-5" />
-                      {downloadingId === viewerMaterial?._id ? 'Downloading...' : 'Download Presentation'}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
-              {viewerMaterial?.mimeType?.includes('pdf') ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-                      disabled={!pdfDoc || pageNumber <= 1}
-                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                      Prev
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPageNumber((p) => (numPages ? Math.min(numPages, p + 1) : p))}
-                      disabled={!pdfDoc || (numPages ? pageNumber >= numPages : true)}
-                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Next
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="text-sm text-gray-600">
-                    {pdfDoc ? (
-                      <span>
-                        Page {pageNumber} of {numPages || '-'}
-                      </span>
-                    ) : (
-                      <span>—</span>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div></div>
-              )}
-
-              <button
-                onClick={() => handleDownload(viewerMaterial)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                disabled={!viewerMaterial || downloadingId === viewerMaterial?._id}
-              >
-                <Download className="w-4 h-4" />
-                {downloadingId === viewerMaterial?._id ? 'Downloading...' : 'Download'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Document Viewer */}
+      {viewerOpen && viewerMaterial && (
+        <DocumentViewer
+          document={viewerMaterial}
+          onClose={closePdfViewer}
+          onDownload={() => handleDownload(viewerMaterial)}
+        />
       )}
     </div>
   );
