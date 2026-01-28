@@ -20,7 +20,6 @@ import EmployeeMap from '../components/employeeLiveMap';
 import { jobRoleCertificateMapping } from '../data/new';
 import Expenses from './Expenses';
 import PerformanceTab from '../components/Performance/PerformanceTab';
-import DocumentViewer from '../components/DocumentManagement/DocumentViewer';
 import {
   PencilIcon,
   PlusIcon,

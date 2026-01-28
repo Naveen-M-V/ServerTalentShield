@@ -1457,36 +1457,41 @@ router.get('/documents/:documentId/versions', checkPermission('view'), async (re
 /**
  * Helper function: Ensure "My Documents" folder exists for employee
  * Creates folder if not exists, returns existing if found
+ * Searches multiple criteria since folder could be created by employee or admin
  */
 async function ensureMyDocumentsFolder(employeeId) {
   try {
-    // Check if folder already exists
+    // Check if folder already exists - search by multiple criteria
     let folder = await Folder.findOne({
       name: 'My Documents',
-      createdBy: employeeId,
-      isActive: true
+      isActive: true,
+      $or: [
+        { createdBy: employeeId },
+        { createdByEmployeeId: employeeId },
+        { 'permissions.viewEmployeeIds': employeeId }
+      ]
     });
 
     if (folder) {
+      console.log('Found existing My Documents folder:', folder._id, 'for employee:', employeeId);
       return folder;
     }
 
-    // Create new "My Documents" folder
+    // Create new "My Documents" folder with proper employee-based permissions
     folder = await Folder.create({
       name: 'My Documents',
       description: 'Personal documents folder',
       createdBy: employeeId,
+      createdByEmployeeId: employeeId,
       permissions: {
-        view: ['admin', 'employee'],
-        edit: ['admin'],
-        upload: ['admin'],
-        download: ['admin', 'employee'],
-        delete: ['admin']
+        viewEmployeeIds: [employeeId],
+        editEmployeeIds: [employeeId],
+        deleteEmployeeIds: [employeeId]
       },
       isActive: true
     });
 
-    console.log('Created My Documents folder for employee:', employeeId);
+    console.log('Created My Documents folder for employee:', employeeId, 'folderId:', folder._id);
     return folder;
   } catch (error) {
     console.error('Error ensuring My Documents folder:', error);
@@ -1569,7 +1574,7 @@ router.get('/employees/:employeeId/my-documents', async (req, res) => {
     });
 
     // Authorization check: if not admin, must be accessing own documents
-    if (userRole !== 'admin' && userRole !== 'super-admin') {
+    if (userRole !== 'admin' && userRole !== 'super-admin' && userRole !== 'hr') {
       if (String(userId) !== String(employeeId)) {
         console.error('❌ Access denied: userId mismatch', {
           userId,
@@ -1579,16 +1584,25 @@ router.get('/employees/:employeeId/my-documents', async (req, res) => {
       }
     }
 
-    // Find My Documents folder
+    // Find My Documents folder - search by multiple criteria since folder could be:
+    // 1. Created by the employee (createdBy or createdByEmployeeId)
+    // 2. Created by admin FOR the employee (has employee in viewEmployeeIds)
     const folder = await Folder.findOne({
       name: 'My Documents',
-      createdBy: employeeId,
-      isActive: true
+      isActive: true,
+      $or: [
+        { createdBy: employeeId },
+        { createdByEmployeeId: employeeId },
+        { 'permissions.viewEmployeeIds': employeeId }
+      ]
     });
 
     if (!folder) {
+      console.log('📂 No My Documents folder found for employee:', employeeId);
       return res.json({ folder: null, documents: [] });
     }
+    
+    console.log('📂 Found My Documents folder:', folder._id, 'for employee:', employeeId);
 
     // Get documents in folder
     const documents = await DocumentManagement.find({

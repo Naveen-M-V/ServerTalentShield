@@ -64,6 +64,9 @@ const Documents = ({ embedded = false }) => {
   
   const [showDocumentViewer, setShowDocumentViewer] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadForm, setUploadForm] = useState({ file: null, category: 'other', description: '', folderId: null });
 
   // Fetch folders from API
   useEffect(() => {
@@ -252,20 +255,14 @@ const Documents = ({ embedded = false }) => {
     setPagination(prev => ({ ...prev, page: newPage }));
   };
 
-  // My Documents handlers
-  const handleUploadToMyDocuments = () => {
-    setUploadForm({ file: null, category: 'other', description: '' });
-    setShowUploadModal(true);
-  };
-
   const handleUploadSubmit = async () => {
     if (!uploadForm.file) {
       showError('Please select a file');
       return;
     }
 
-    if (!myDocumentsFolder?._id) {
-      showError('My Documents folder not found');
+    if (!uploadForm.folderId) {
+      showError('Please select a folder');
       return;
     }
 
@@ -276,7 +273,7 @@ const Documents = ({ embedded = false }) => {
       const formData = new FormData();
       formData.append('file', uploadForm.file);
       formData.append('category', uploadForm.category);
-      formData.append('folderId', myDocumentsFolder._id);
+      formData.append('folderId', uploadForm.folderId);
       if (uploadForm.description) {
         formData.append('description', uploadForm.description);
       }
@@ -292,11 +289,13 @@ const Documents = ({ embedded = false }) => {
 
       showSuccess('Document uploaded successfully!');
       setShowUploadModal(false);
-      setUploadForm({ file: null, category: 'other', description: '' });
+      setUploadForm({ file: null, category: 'other', description: '', folderId: null });
       
-      // Refresh My Documents folder contents
-      if (selectedFolderId === myDocumentsFolder._id) {
-        fetchFolderContents(myDocumentsFolder._id);
+      // Refresh folder contents if viewing a folder
+      if (selectedFolderId) {
+        fetchFolderContents(selectedFolderId);
+      } else {
+        fetchFolders();
       }
     } catch (error) {
       console.error('Error uploading document:', error);
@@ -340,6 +339,61 @@ const Documents = ({ embedded = false }) => {
 
   const totalPages = Math.ceil(pagination.total / pagination.limit);
 
+  // Helper: Employee upload to current folder (for embedded mode)
+  const handleEmployeeUploadToFolder = async () => {
+    if (!uploadForm.file) {
+      showError('Please select a file');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const token = localStorage.getItem('auth_token');
+      
+      const formData = new FormData();
+      formData.append('file', uploadForm.file);
+      formData.append('category', uploadForm.category);
+      if (uploadForm.description) {
+        formData.append('description', uploadForm.description);
+      }
+
+      // Upload to the currently selected folder
+      const targetFolderId = selectedFolderId || uploadForm.folderId;
+      
+      if (!targetFolderId) {
+        showError('Please select a folder first');
+        setUploading(false);
+        return;
+      }
+
+      await axios.post(
+        buildApiUrl(`/documentManagement/folders/${targetFolderId}/documents`),
+        formData,
+        {
+          headers: { 
+            'Content-Type': 'multipart/form-data',
+            ...(token && { 'Authorization': `Bearer ${token}` })
+          },
+          withCredentials: true
+        }
+      );
+
+      showSuccess('Document uploaded successfully!');
+      setShowUploadModal(false);
+      setUploadForm({ file: null, category: 'other', description: '', folderId: null });
+      
+      // Refresh folder contents
+      if (selectedFolderId) {
+        fetchFolderContents(selectedFolderId);
+      }
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      showError(error.response?.data?.message || 'Failed to upload document');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   if (embedded && selectedFolderId) {
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -357,6 +411,16 @@ const Documents = ({ embedded = false }) => {
               <p className="text-sm text-gray-500">{folderContents?.length || 0} items</p>
             </div>
           </div>
+          
+          {/* Upload button for employees in embedded mode */}
+          <button
+            type="button"
+            onClick={() => setShowUploadModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Upload</span>
+          </button>
         </div>
 
         {folderLoading ? (
@@ -404,6 +468,101 @@ const Documents = ({ embedded = false }) => {
             ))}
           </div>
         )}
+
+        {/* Upload Modal for embedded folder view */}
+        {showUploadModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold mb-4">Upload Document to {selectedFolder?.name || 'Folder'}</h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select File *
+                  </label>
+                  <input
+                    type="file"
+                    onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files[0] })}
+                    className="w-full p-2 border rounded text-sm file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Category
+                  </label>
+                  <select
+                    value={uploadForm.category}
+                    onChange={(e) => setUploadForm({ ...uploadForm, category: e.target.value })}
+                    className="w-full p-2 border rounded"
+                  >
+                    <option value="other">Other</option>
+                    <option value="contract">Contract</option>
+                    <option value="certificate">Certificate</option>
+                    <option value="id_proof">ID Proof</option>
+                    <option value="visa">Visa</option>
+                    <option value="passport">Passport</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description (optional)
+                  </label>
+                  <textarea
+                    value={uploadForm.description}
+                    onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
+                    className="w-full p-2 border rounded"
+                    rows="3"
+                    placeholder="Add a description..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end mt-6">
+                <button
+                  onClick={() => {
+                    setShowUploadModal(false);
+                    setUploadForm({ file: null, category: 'other', description: '', folderId: null });
+                  }}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                  disabled={uploading}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEmployeeUploadToFolder}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+                  disabled={uploading || !uploadForm.file}
+                >
+                  {uploading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Upload</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Document Viewer for embedded mode */}
+        {showDocumentViewer && selectedDocument && (
+          <DocumentViewer
+            document={selectedDocument}
+            onClose={() => {
+              setShowDocumentViewer(false);
+              setSelectedDocument(null);
+            }}
+            onDownload={handleDownloadDocument}
+          />
+        )}
       </div>
     );
   }
@@ -417,84 +576,7 @@ const Documents = ({ embedded = false }) => {
           <p className="text-gray-600">Manage your personal documents and folders</p>
         </div>
 
-        {/* My Documents Section */}
-        {myDocumentsFolder && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-50 rounded-lg">
-                  <Folder className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">My Documents</h2>
-                  <p className="text-sm text-gray-600">Your personal document folder</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleUploadToMyDocuments}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Upload className="w-4 h-4" />
-                  Upload Document
-                </button>
-                <button
-                  onClick={() => handleFolderClick(myDocumentsFolder._id)}
-                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  View All
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Recent documents preview */}
-            {selectedFolderId === myDocumentsFolder._id && folderContents.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {folderContents.slice(0, 3).map((doc) => (
-                  <div
-                    key={doc._id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <FileText className="w-5 h-5 text-gray-500" />
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-gray-900 truncate">{doc.name || doc.fileName}</h4>
-                        <p className="text-sm text-gray-500">
-                          {doc.createdAt ? new Date(doc.createdAt).toLocaleDateString() : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewDocument(doc);
-                        }}
-                        className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
-                        title="View document"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDownloadDocument(doc);
-                        }}
-                        className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Download document"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Divider */}
+        {/* All Folders Section */}
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">All Folders</h2>
         </div>
